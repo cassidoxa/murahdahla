@@ -65,8 +65,6 @@ impl EventHandler for Handler {
             process_time_submission(&ctx, &msg).unwrap();
             msg.delete(&ctx).unwrap();
             update_leaderboard(&ctx);
-        } else {
-            msg.delete(&ctx).unwrap();
         }
     }
 
@@ -211,7 +209,7 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
             .get_message(submission_channel, submission_posts[0].post_id)?;
 
         for i in leaderboard_posts {
-            let old_leaderboard_post: &Message = &ctx.http.get_message(leaderboard_channel, i)?;
+            let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i)?;
             moved_leaderboard.push_str(&old_leaderboard_post.content);
             old_leaderboard_post.delete(&ctx)?;
         }
@@ -406,7 +404,7 @@ fn initialize_leaderboard(
         .expect("No submission channel in the environment")
         .get("leaderboard_channel")
         .unwrap();
-    let leaderboard_string = format!("{} {}", "Leaderboard", game_string);
+    let leaderboard_string = format!("{} {}", "Leaderboard for", game_string);
     let leaderboard_result = leaderboard_channel.say(&ctx.http, leaderboard_string);
     let leaderboard_post_id = match leaderboard_result {
         Ok(leaderboard_result) => *leaderboard_result.id.as_u64(),

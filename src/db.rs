@@ -158,6 +158,15 @@ pub fn clear_all_tables(db_mutex: &Mutex<MysqlConnection>) -> Result<(), Command
     Ok(())
 }
 
+// temp fix
+pub fn check_for_active_game(db_mutex: &Mutex<MysqlConnection>) -> Result<bool, CommandError> {
+    use crate::schema::games::columns::game_active;
+    let conn = &*db_mutex.lock();
+    let active_game: bool =
+        diesel::dsl::select(exists(games::table.filter(game_active.eq(true)))).get_result(conn)?;
+    Ok(active_game)
+}
+
 #[derive(Debug, Insertable)]
 #[table_name = "games"]
 pub struct NewGame {

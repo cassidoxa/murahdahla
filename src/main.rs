@@ -29,8 +29,11 @@ fn main() {
     {
         let mut data = client.data.write();
         let db_connection = Mutex::new(db::establish_connection());
+        // temp fix
+        let active_game: bool = db::check_for_active_game(&db_connection).unwrap();
         data.insert::<DBConnectionContainer>(db_connection);
-        data.insert::<ActiveGames>(false);
+        println!("{}", active_game);
+        data.insert::<ActiveGames>(active_game);
     }
 
     client.with_framework(
