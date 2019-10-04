@@ -13,14 +13,14 @@ mod discord;
 mod schema;
 mod z3r;
 
-use std::{collections::HashMap, env};
+use std::{collections::HashMap, env, error, fmt};
 
 use dotenv::dotenv;
 use serenity::{framework::standard::StandardFramework, model::id::ChannelId, prelude::*};
 
 use discord::{ActiveGames, ChannelsContainer, DBConnectionContainer, Handler};
 
-fn main() {
+fn main() -> Result<(), BotError> {
     //connect to discord and database
     dotenv().ok();
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment.");
@@ -41,8 +41,25 @@ fn main() {
             .configure(|c| c.prefix("!"))
             .group(&discord::ADMIN_GROUP),
     );
-
     if let Err(why) = client.start() {
         println!("Client error: {:?}", why);
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct BotError;
+
+impl fmt::Display for BotError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "The bot crashed")
+    }
+}
+
+impl error::Error for BotError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        // Generic error, underlying cause isn't tracked.
+        None
     }
 }
