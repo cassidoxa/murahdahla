@@ -361,7 +361,10 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     if maybe_submission.len() != 2 {
         return Ok(());
     }
-    let submission_time_result = NaiveTime::parse_from_str(maybe_submission.remove(0), "%H:%M:%S");
+
+    let maybe_time: &str = &maybe_submission.remove(0);
+    let maybe_time2 = maybe_time.replace("\\", "");
+    let submission_time_result = NaiveTime::parse_from_str(&maybe_time2, "%H:%M:%S");
     let submission_time = match submission_time_result {
         Ok(submission_time_result) => submission_time_result,
         Err(submission_time_result) => {

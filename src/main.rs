@@ -32,7 +32,6 @@ fn main() {
         // temp fix
         let active_game: bool = db::check_for_active_game(&db_connection).unwrap();
         data.insert::<DBConnectionContainer>(db_connection);
-        println!("{}", active_game);
         data.insert::<ActiveGames>(active_game);
     }
 
