@@ -1,28 +1,19 @@
-use std::{cmp::Reverse, collections::HashMap, env};
+use std::{collections::HashMap, env};
 
-use chrono::{
-    naive::{NaiveDate, NaiveTime},
-    offset::Utc,
-};
-use diesel::{
-    dsl::{insert_into, select},
-    mysql::MysqlConnection,
-    prelude::*,
-};
+use chrono::{naive::NaiveTime, offset::Utc, ParseError};
+use diesel::{mysql::MysqlConnection, prelude::*};
 use serenity::{
     framework::standard::{
         macros::{command, group},
         Args, CommandResult,
     },
     model::{
-        channel::{GuildChannel, Message},
+        channel::Message,
         gateway::Ready,
-        guild::{Member, PartialGuild},
+        guild::PartialGuild,
         id::{ChannelId, RoleId},
-        user::CurrentUser,
     },
     prelude::*,
-    utils,
 };
 
 use crate::db::{
@@ -118,8 +109,6 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         msg.delete(&ctx)?;
         return Ok(());
     }
-    // first get some info about the server to be used later and store it in mem or db
-    get_channels(ctx);
     //refresh(&ctx, msg)?;
 
     // TODO: could parse/validate this better but this is good for now
@@ -192,17 +181,28 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         .get("submission_channel")
         .unwrap()
         .as_u64();
+
     if *msg.channel_id.as_u64() != submission_channel {
         msg.delete(&ctx)?;
         return Ok(());
     }
-
+    if msg
+        .member
+        .as_ref()
+        .unwrap()
+        .roles
+        .iter()
+        .find(|x| x.as_u64() == admin_role.as_u64())
+        == None
+    {
+        msg.delete(&ctx)?;
+        return Ok(());
+    }
     let active_games: Vec<Game> = get_active_games(connection)?;
     if active_games.len() >= 1 {
         let mut moved_leaderboard = String::with_capacity(2000);
         let mut submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection);
-        submission_posts.sort_by(|a, b| b.post_time.cmp(&a.post_time));
-        submission_posts.reverse();
+        submission_posts.sort_by(|a, b| b.post_time.cmp(&a.post_time).reverse());
         let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection);
         let mut most_recent_submission_post: Message = ctx
             .http
@@ -223,8 +223,8 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         let spoiler_role = get_spoiler_role(&guild);
         let leaderboard_ids = get_leaderboard_ids(connection);
         for id in leaderboard_ids {
-            let mut member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
-            member.remove_role(&ctx, spoiler_role);
+            let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
+            member.remove_role(&ctx, spoiler_role)?;
         }
     } else {
         return Ok(());
@@ -235,49 +235,49 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
-fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
-    let data = ctx.data.read();
-    let connection = data
-        .get::<DBConnectionContainer>()
-        .expect("Expected DB connection in ShareMap.");
-    let leaderboard_channel: u64 = *data
-        .get::<ChannelsContainer>()
-        .expect("No submission channel in the environment")
-        .get("leaderboard_channel")
-        .unwrap()
-        .as_u64();
-    let submission_channel: u64 = *data
-        .get::<ChannelsContainer>()
-        .expect("No submission channel in the environment")
-        .get("submission_channel")
-        .unwrap()
-        .as_u64();
-    let active_games: Vec<Game> = get_active_games(connection)?;
-    if active_games.len() >= 1 {
-        let mut moved_leaderboard = String::with_capacity(2000);
-        let mut submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection);
-        submission_posts.sort_by(|a, b| b.post_time.cmp(&a.post_time));
-        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection);
-        let mut most_recent_submission_post: Message = ctx
-            .http
-            .get_message(submission_channel, submission_posts[0].post_id)?;
-
-        for i in leaderboard_posts {
-            let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i)?;
-            moved_leaderboard.push_str(&old_leaderboard_post.content);
-            old_leaderboard_post.delete(ctx)?;
-        }
-
-        most_recent_submission_post.edit(ctx, |x| x.content(moved_leaderboard))?;
-        // delete all posts in leaderboard channel
-        // add leaderboard to latest post in submission channel
-        // remove spoiler role from everyone who has it
-        // delete all db tables
-    }
-
-    Ok(())
-}
+//fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
+//    let _guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
+//    let data = ctx.data.read();
+//    let connection = data
+//        .get::<DBConnectionContainer>()
+//        .expect("Expected DB connection in ShareMap.");
+//    let leaderboard_channel: u64 = *data
+//        .get::<ChannelsContainer>()
+//        .expect("No submission channel in the environment")
+//        .get("leaderboard_channel")
+//        .unwrap()
+//        .as_u64();
+//    let submission_channel: u64 = *data
+//        .get::<ChannelsContainer>()
+//        .expect("No submission channel in the environment")
+//        .get("submission_channel")
+//        .unwrap()
+//        .as_u64();
+//    let active_games: Vec<Game> = get_active_games(connection)?;
+//    if active_games.len() >= 1 {
+//        let mut moved_leaderboard = String::with_capacity(2000);
+//        let mut submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection);
+//        submission_posts.sort_by(|a, b| b.post_time.cmp(&a.post_time));
+//        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection);
+//        let mut most_recent_submission_post: Message = ctx
+//            .http
+//            .get_message(submission_channel, submission_posts[0].post_id)?;
+//
+//        for i in leaderboard_posts {
+//            let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i)?;
+//            moved_leaderboard.push_str(&old_leaderboard_post.content);
+//            old_leaderboard_post.delete(ctx)?;
+//        }
+//
+//        most_recent_submission_post.edit(ctx, |x| x.content(moved_leaderboard))?;
+//        // delete all posts in leaderboard channel
+//        // add leaderboard to latest post in submission channel
+//        // remove spoiler role from everyone who has it
+//        // delete all db tables
+//    }
+//
+//    Ok(())
+//}
 fn get_admin_role(guild: &PartialGuild) -> RoleId {
     let admin_role = guild.role_by_name(
         env::var("DISCORD_ADMIN_ROLE")
@@ -296,7 +296,7 @@ fn get_spoiler_role(guild: &PartialGuild) -> RoleId {
     spoiler_role.unwrap().id
 }
 
-fn get_channels(ctx: &mut Context) {
+pub fn get_channels() -> Result<HashMap<&'static str, ChannelId>, serenity::Error> {
     let mut bot_channels: HashMap<&'static str, ChannelId> = HashMap::with_capacity(3);
     bot_channels.insert(
         "submission_channel",
@@ -326,8 +326,7 @@ fn get_channels(ctx: &mut Context) {
         ),
     );
 
-    let mut data = ctx.data.write();
-    data.insert::<ChannelsContainer>(bot_channels);
+    Ok(bot_channels)
 }
 
 fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), SubmissionError> {
@@ -362,22 +361,19 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
         return Ok(());
     }
 
-    let maybe_time: &str = &maybe_submission.remove(0);
-    let maybe_time2 = maybe_time.replace("\\", "");
-    let submission_time_result = NaiveTime::parse_from_str(&maybe_time2, "%H:%M:%S");
+    let maybe_time: &str = &maybe_submission.remove(0).replace("\\", "");
+    let submission_time_result: Result<NaiveTime, ParseError> =
+        NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S");
     let submission_time = match submission_time_result {
-        Ok(submission_time_result) => submission_time_result,
-        Err(submission_time_result) => {
-            return Ok(());
-        }
+        Ok(submission_time) => submission_time,
+        // log here, but fail silently, return, and continue
+        Err(_e) => return Ok(()),
     };
 
     let submission_collect_result = maybe_submission.remove(0).parse::<u8>();
     let submission_collect = match submission_collect_result {
-        Ok(submission_collect_result) => submission_collect_result,
-        Err(submission_collect_result) => {
-            return Ok(());
-        }
+        Ok(submission_collect) => submission_collect,
+        Err(_e) => return Ok(()),
     };
 
     let mut current_member = msg.member(ctx).unwrap();
@@ -437,10 +433,7 @@ fn update_leaderboard(ctx: &Context) {
 
     let mut all_submissions = get_leaderboard(connection);
     let leaderboard_posts = get_leaderboard_posts(&leaderboard_channel, connection);
-    // TODO: rewrite to take an arbitrary amount of LB entries and automatically create and
-    // fill the necessary posts
-    all_submissions.sort_by(|a, b| b.runner_time.cmp(&a.runner_time));
-    all_submissions.reverse();
+    all_submissions.sort_by(|a, b| b.runner_time.cmp(&a.runner_time).reverse());
     if all_submissions.len() <= 50 {
         let mut post = ctx
             .http

@@ -13,12 +13,12 @@ mod discord;
 mod schema;
 mod z3r;
 
-use std::env;
+use std::{collections::HashMap, env};
 
 use dotenv::dotenv;
-use serenity::{framework::standard::StandardFramework, prelude::*};
+use serenity::{framework::standard::StandardFramework, model::id::ChannelId, prelude::*};
 
-use discord::{ActiveGames, DBConnectionContainer, Handler};
+use discord::{ActiveGames, ChannelsContainer, DBConnectionContainer, Handler};
 
 fn main() {
     //connect to discord and database
@@ -29,10 +29,11 @@ fn main() {
     {
         let mut data = client.data.write();
         let db_connection = Mutex::new(db::establish_connection());
-        // temp fix
         let active_game: bool = db::check_for_active_game(&db_connection).unwrap();
+        let channels: HashMap<&'static str, ChannelId> = discord::get_channels().unwrap();
         data.insert::<DBConnectionContainer>(db_connection);
         data.insert::<ActiveGames>(active_game);
+        data.insert::<ChannelsContainer>(channels);
     }
 
     client.with_framework(

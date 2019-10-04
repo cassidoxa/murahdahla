@@ -134,7 +134,7 @@ pub fn get_submission_posts(
     submission_channel: &u64,
     db_mutex: &Mutex<MysqlConnection>,
 ) -> Vec<Post> {
-    use crate::schema::posts::columns::{guild_channel, post_id};
+    use crate::schema::posts::columns::guild_channel;
     let conn = &*db_mutex.lock();
     let all_posts = posts::table
         .filter(guild_channel.eq(*submission_channel))

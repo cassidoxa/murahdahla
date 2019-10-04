@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "murahdahla"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono 0.4.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
