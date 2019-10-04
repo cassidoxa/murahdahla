@@ -24,9 +24,13 @@ Copy and rename `.env.example` to `.env`.
 ## 4. Diesel Setup
 
 Murahdahla requires a MySQL database and uses the [Diesel ORM](https://github.com/diesel-rs/diesel)
-to manage the database. Refer to the MySQL documentation for instructions on setting up a database.
+to manage the database. First install `diesel-cli` by running
+
+`cargo install diesel_cli --no-default-features --features "mysql"`
+
 Put the database URL in your `.env` file. Then run `diesel migration setup`. If the database needs
 to be migrated following an update, you must run `diesel migration run` after pulling the update.
+Refer to the MySQL documentation for instructions on setting up a database.
 
 # Running the Bot and Managing Permissions
 
