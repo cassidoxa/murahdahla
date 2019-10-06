@@ -1,7 +1,7 @@
-use std::{collections::HashMap, env, fmt};
+use std::{collections::HashMap, env};
 
-use chrono::{offset::Utc, NaiveDateTime, NaiveTime, ParseError};
-use diesel::{mysql::MysqlConnection, prelude::*};
+use chrono::{offset::Utc, NaiveDateTime, NaiveTime};
+use diesel::mysql::MysqlConnection;
 
 use serenity::{
     framework::standard::{
@@ -20,9 +20,9 @@ use serenity::{
 use crate::db::{
     clear_all_tables, create_game_entry, create_post_entry, create_submission_entry,
     get_active_games, get_leaderboard, get_leaderboard_ids, get_leaderboard_posts,
-    get_submission_posts, Game, Post, SubmissionError,
+    get_submission_posts, Game, Post,
 };
-use crate::error::RoleError;
+use crate::error::{BotError, RoleError, SubmissionError};
 use crate::z3r;
 
 pub struct Handler;
@@ -33,16 +33,19 @@ impl EventHandler for Handler {
         let game_active: bool = *data
             .get::<ActiveGames>()
             .expect("No active game toggle set");
-        let guild_result = msg.guild_id.unwrap().to_partial_guild(&ctx.http);
-        let guild = match guild_result {
+        let guild_id = match msg.guild_id {
+            Some(guild_id) => guild_id,
+            None => return,
+        };
+        let guild = match guild_id.to_partial_guild(&ctx.http) {
             Ok(guild) => guild,
             Err(e) => {
                 warn!("Couldn't get partial guild from REST API. ERROR: {}", e);
                 return;
             }
         };
-        let admin_role_result = get_admin_role(&guild);
-        let admin_role = match admin_role_result {
+
+        let admin_role = match get_admin_role(&guild) {
             Ok(admin_role) => admin_role,
             Err(e) => {
                 warn!("Couldn't get admin role. Check if properly set in environment variables. ERROR: {}", e);
@@ -53,10 +56,15 @@ impl EventHandler for Handler {
         if msg.author.id != ctx.cache.read().user.id
         && game_active
         && msg.channel_id.as_u64()
-            == &env::var("SUBMISSION_CHANNEL_ID")
+            == match &env::var("SUBMISSION_CHANNEL_ID")
                 .expect("No submissions channel in the environment")
-                .parse::<u64>()
-                .unwrap()
+                .parse::<u64>() {
+                    Ok(channel_u64) => channel_u64,
+                    Err(e) => {
+                        warn!("Error parsing channel id: {}", e);
+                        return;
+                    }
+        }
         // TODO: refactor this
         && (msg
             .member
@@ -68,33 +76,28 @@ impl EventHandler for Handler {
             [msg.content.as_str().bytes().nth(0).unwrap()] != "!".as_bytes()
             )
         {
-            process_time_submission(&ctx, &msg).unwrap();
+            match process_time_submission(&ctx, &msg) {
+                Ok(()) => (),
+                Err(e) => {
+                    warn!("Error processing time submission: {}", e);
+                    return;
+                }
+            };
+
             msg.delete(&ctx).unwrap();
-            update_leaderboard(&ctx);
-        }
+            match update_leaderboard(&ctx) {
+                Ok(()) => (),
+                Err(e) => {
+                    warn!("Error updating leaderboard: {}", e);
+                    return;
+                }
+            }
+        };
     }
 
     fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
     }
-}
-
-pub struct DBConnectionContainer;
-
-impl TypeMapKey for DBConnectionContainer {
-    type Value = Mutex<MysqlConnection>;
-}
-
-pub struct ChannelsContainer;
-
-impl TypeMapKey for ChannelsContainer {
-    type Value = HashMap<&'static str, ChannelId>;
-}
-
-pub struct ActiveGames;
-
-impl TypeMapKey for ActiveGames {
-    type Value = bool;
 }
 
 #[command]
@@ -169,8 +172,8 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         current_time,
         *guild.id.as_u64(),
         *msg.channel_id.as_u64(),
-    );
-    initialize_leaderboard(ctx, connection, guild.id.as_u64(), &game_string);
+    )?;
+    initialize_leaderboard(ctx, connection, guild.id.as_u64(), &game_string)?;
     msg.delete(&ctx)?;
     Ok(())
 }
@@ -216,9 +219,10 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
     let active_games: Vec<Game> = get_active_games(connection)?;
     if active_games.len() >= 1 {
         let mut moved_leaderboard = String::with_capacity(2000);
-        let mut submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection);
+        let mut submission_posts: Vec<Post> =
+            get_submission_posts(&submission_channel, connection)?;
         submission_posts.sort_by(|a, b| b.post_datetime.cmp(&a.post_datetime).reverse());
-        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection);
+        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection)?;
         let mut most_recent_submission_post: Message = ctx
             .http
             .get_message(submission_channel, submission_posts[0].post_id)?;
@@ -236,7 +240,7 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         // delete all db tables
 
         let spoiler_role = get_spoiler_role(&guild)?;
-        let leaderboard_ids = get_leaderboard_ids(connection);
+        let leaderboard_ids = get_leaderboard_ids(connection)?;
         for id in leaderboard_ids {
             let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
             member.remove_role(&ctx, spoiler_role)?;
@@ -348,8 +352,16 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     let guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
     let runner_id = msg.author.id;
     let runner_name = msg.author.name.as_str();
-    let spoiler_role = get_spoiler_role(&guild)?;
-    let ff = vec!["ff", "FF", "forfeit", "Forfeit"];
+    let spoiler_role = match get_spoiler_role(&guild) {
+        Ok(role) => role,
+        Err(e) => {
+            warn!(
+                "Processing submission: Couldn't get spoiler role from REST API: {}",
+                e
+            );
+            return Ok(());
+        }
+    };
 
     let mut maybe_submission: Vec<&str> =
         msg.content.as_str().trim_end().split_whitespace().collect();
@@ -357,11 +369,18 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     let data = ctx.data.read();
     let connection = data
         .get::<DBConnectionContainer>()
-        .expect("Expected DB connection in ShareMap.");
+        .expect("Expected DB connection in ShareMap. Please check environment variables.");
 
+    let ff = vec!["ff", "FF", "forfeit", "Forfeit"];
     if ff.iter().any(|&x| x == maybe_submission[0]) {
         let mut current_member = msg.member(ctx).unwrap();
-        current_member.add_role(ctx, spoiler_role)?;
+        match current_member.add_role(ctx, spoiler_role) {
+            Ok(()) => (),
+            Err(e) => {
+                warn!("Processing submission: Error adding role: {}", e);
+                return Ok(());
+            }
+        };
         create_submission_entry(
             connection,
             runner_name,
@@ -377,12 +396,11 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     }
 
     let maybe_time: &str = &maybe_submission.remove(0).replace("\\", "");
-    let submission_time_result = NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S");
-    let submission_time = match submission_time_result {
+    let submission_time = match NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S") {
         Ok(submission_time) => submission_time,
         Err(_e) => {
-            warn!(
-                "Incorrectly formatted time from {} : {}",
+            info!(
+                "Processing submission: Incorrectly formatted time from {} : {}",
                 &msg.author.name, &maybe_time
             );
             return Ok(());
@@ -390,20 +408,38 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     };
 
     let maybe_collect: &str = maybe_submission.remove(0);
-    let submission_collect_result = maybe_collect.parse::<u8>();
-    let submission_collect = match submission_collect_result {
+    let submission_collect = match maybe_collect.parse::<u8>() {
         Ok(submission_collect) => submission_collect,
         Err(_e) => {
             info!(
-                "Collection rate couldn't be parsed into 8-bit integer: {} : {}",
+                "Processing submission: Collection rate couldn't be parsed into 8-bit integer: {} : {}",
                 &msg.author.name, &maybe_collect
             );
             return Ok(());
         }
     };
 
-    let mut current_member = msg.member(ctx).unwrap();
-    current_member.add_role(ctx, spoiler_role)?;
+    let mut current_member = match msg.member(ctx) {
+        Some(member) => member,
+        None => {
+            warn!(
+                "Processing submission: Error retrieving Member data from API for {}",
+                &msg.author.name
+            );
+            return Ok(());
+        }
+    };
+
+    match current_member.add_role(ctx, spoiler_role) {
+        Ok(()) => (),
+        Err(e) => {
+            warn!(
+                "Processing submission: Couldn't add spoiler role to {}. Error: {}",
+                &msg.author.name, e
+            );
+            return Ok(());
+        }
+    };
 
     create_submission_entry(
         connection,
@@ -421,7 +457,7 @@ fn initialize_leaderboard(
     db_mutex: &Mutex<MysqlConnection>,
     guild_id: &u64,
     game_string: &str,
-) {
+) -> Result<(), BotError> {
     let current_time: NaiveDateTime = Utc::now().naive_utc();
     let data = ctx.data.read();
     let leaderboard_channel: ChannelId = *data
@@ -430,10 +466,12 @@ fn initialize_leaderboard(
         .get("leaderboard_channel")
         .unwrap();
     let leaderboard_string = format!("{} {}", "Leaderboard for", game_string);
-    let leaderboard_result = leaderboard_channel.say(&ctx.http, leaderboard_string);
-    let leaderboard_post_id = match leaderboard_result {
-        Ok(leaderboard_result) => *leaderboard_result.id.as_u64(),
-        Err(_leaderboard_result) => return,
+    let leaderboard_post_id = match leaderboard_channel.say(&ctx.http, leaderboard_string) {
+        Ok(leaderboard_message) => *leaderboard_message.id.as_u64(),
+        Err(e) => {
+            warn!("Error initializing leaderboard: {}", e);
+            return Ok(());
+        }
     };
 
     create_post_entry(
@@ -442,10 +480,12 @@ fn initialize_leaderboard(
         current_time,
         *guild_id,
         *leaderboard_channel.as_u64(),
-    );
+    )?;
+
+    Ok(())
 }
 
-fn update_leaderboard(ctx: &Context) {
+fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
     let data = ctx.data.read();
     let connection = data
         .get::<DBConnectionContainer>()
@@ -457,8 +497,8 @@ fn update_leaderboard(ctx: &Context) {
         .unwrap()
         .as_u64();
 
-    let mut all_submissions = get_leaderboard(connection);
-    let leaderboard_posts = get_leaderboard_posts(&leaderboard_channel, connection);
+    let mut all_submissions = get_leaderboard(connection)?;
+    let leaderboard_posts = get_leaderboard_posts(&leaderboard_channel, connection)?;
     all_submissions.sort_by(|a, b| b.runner_time.cmp(&a.runner_time).reverse());
     if all_submissions.len() <= 50 {
         let mut post = ctx
@@ -484,6 +524,8 @@ fn update_leaderboard(ctx: &Context) {
 
         post.edit(ctx, |x| x.content(edit_string)).unwrap();
     }
+
+    Ok(())
 }
 
 fn set_game_active(ctx: &mut Context, toggle: bool) {
@@ -498,3 +540,21 @@ group!({
     options: {},
     commands: [start, stop]
 });
+
+pub struct DBConnectionContainer;
+
+impl TypeMapKey for DBConnectionContainer {
+    type Value = Mutex<MysqlConnection>;
+}
+
+pub struct ChannelsContainer;
+
+impl TypeMapKey for ChannelsContainer {
+    type Value = HashMap<&'static str, ChannelId>;
+}
+
+pub struct ActiveGames;
+
+impl TypeMapKey for ActiveGames {
+    type Value = bool;
+}

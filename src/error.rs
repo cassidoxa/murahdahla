@@ -60,3 +60,34 @@ impl From<serenity::Error> for RoleError {
         RoleError::new(err.description())
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct SubmissionError {
+    details: String,
+}
+
+impl SubmissionError {
+    fn new(msg: &str) -> SubmissionError {
+        SubmissionError {
+            details: msg.to_string(),
+        }
+    }
+}
+
+impl Error for SubmissionError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
+impl fmt::Display for SubmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
+
+impl From<diesel::result::Error> for SubmissionError {
+    fn from(err: diesel::result::Error) -> Self {
+        SubmissionError::new(err.description())
+    }
+}

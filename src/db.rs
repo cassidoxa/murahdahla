@@ -1,14 +1,13 @@
-use std::{env, fmt};
-
 pub use crate::schema::{games, leaderboard, posts};
 pub use chrono::{offset::Utc, NaiveDate, NaiveDateTime, NaiveTime};
 pub use diesel::{dsl::exists, mysql::MysqlConnection, prelude::*, result::Error};
-use serenity::{framework::standard::CommandError, prelude::*};
+use serenity::prelude::*;
 
-pub fn establish_connection() -> MysqlConnection {
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    MysqlConnection::establish(&database_url)
-        .expect(&format!("Error connecting to {}", database_url))
+pub fn establish_connection(database_url: &str) -> Result<MysqlConnection, Error> {
+    let database_connection = MysqlConnection::establish(database_url)
+        .expect(&format!("Error connecting to {}", database_url));
+
+    Ok(database_connection)
 }
 
 pub fn create_game_entry(db_mutex: &Mutex<MysqlConnection>, guild: u64, todays_date: &NaiveDate) {
@@ -31,15 +30,14 @@ pub fn create_post_entry(
     time: NaiveDateTime,
     guild: u64,
     channel: u64,
-) {
+) -> Result<(), Error> {
     use crate::schema::games::columns::*;
     let conn = &*db_mutex.lock();
     let game: u32 = games::table
         .select(game_id)
         .filter(guild_id.eq(guild))
         .filter(game_active.eq(true))
-        .get_result(conn)
-        .unwrap();
+        .get_result(conn)?;
 
     let new_post = Post {
         post_id: post,
@@ -51,8 +49,9 @@ pub fn create_post_entry(
 
     diesel::insert_into(posts::table)
         .values(new_post)
-        .execute(conn)
-        .unwrap();
+        .execute(conn)?;
+
+    Ok(())
 }
 
 pub fn create_submission_entry(
@@ -62,7 +61,7 @@ pub fn create_submission_entry(
     time: NaiveTime,
     collection: u8,
     forfeit: bool,
-) -> Result<(), SubmissionError> {
+) -> Result<(), Error> {
     use crate::schema::{games::columns::*, leaderboard::columns::runner_id as runner_ids};
     let conn = &*db_mutex.lock();
     let duplicate_check = leaderboard::table
@@ -98,14 +97,14 @@ pub fn create_submission_entry(
     Ok(())
 }
 
-pub fn get_leaderboard(db_mutex: &Mutex<MysqlConnection>) -> Vec<OldSubmission> {
+pub fn get_leaderboard(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<OldSubmission>, Error> {
     let conn = &*db_mutex.lock();
     let all_submissions: Vec<OldSubmission> =
         leaderboard::table.load::<OldSubmission>(conn).unwrap();
-    all_submissions
+    Ok(all_submissions)
 }
 
-pub fn get_leaderboard_ids(db_mutex: &Mutex<MysqlConnection>) -> Vec<u64> {
+pub fn get_leaderboard_ids(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<u64>, Error> {
     use crate::schema::leaderboard::columns::runner_id;
     let conn = &*db_mutex.lock();
     let leaderboard_ids: Vec<u64> = leaderboard::table
@@ -113,13 +112,13 @@ pub fn get_leaderboard_ids(db_mutex: &Mutex<MysqlConnection>) -> Vec<u64> {
         .load::<u64>(conn)
         .unwrap();
 
-    leaderboard_ids
+    Ok(leaderboard_ids)
 }
 
 pub fn get_leaderboard_posts(
     leaderboard_channel: &u64,
     db_mutex: &Mutex<MysqlConnection>,
-) -> Vec<u64> {
+) -> Result<Vec<u64>, Error> {
     use crate::schema::posts::columns::{guild_channel, post_id};
     let conn = &*db_mutex.lock();
     let all_posts = posts::table
@@ -127,20 +126,20 @@ pub fn get_leaderboard_posts(
         .select(post_id)
         .load::<u64>(conn)
         .unwrap();
-    all_posts
+    Ok(all_posts)
 }
 
 pub fn get_submission_posts(
     submission_channel: &u64,
     db_mutex: &Mutex<MysqlConnection>,
-) -> Vec<Post> {
+) -> Result<Vec<Post>, Error> {
     use crate::schema::posts::columns::guild_channel;
     let conn = &*db_mutex.lock();
     let all_posts = posts::table
         .filter(guild_channel.eq(*submission_channel))
         .load::<Post>(conn)
         .unwrap();
-    all_posts
+    Ok(all_posts)
 }
 
 pub fn get_active_games(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<Game>, Error> {
@@ -208,14 +207,4 @@ pub struct Post {
     pub game_id: u32,
     pub guild_id: u64,
     pub guild_channel: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct SubmissionError(pub String);
-
-impl<T: fmt::Display> From<T> for SubmissionError {
-    #[inline]
-    fn from(d: T) -> Self {
-        SubmissionError(d.to_string())
-    }
 }
