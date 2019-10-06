@@ -21,7 +21,7 @@ table! {
 table! {
     posts (post_id) {
         post_id -> Unsigned<Bigint>,
-        post_time -> Time,
+        post_datetime -> Datetime,
         game_id -> Unsigned<Integer>,
         guild_id -> Unsigned<Bigint>,
         guild_channel -> Unsigned<Bigint>,

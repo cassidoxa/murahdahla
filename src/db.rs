@@ -1,8 +1,8 @@
 use std::{env, fmt};
 
 pub use crate::schema::{games, leaderboard, posts};
-pub use chrono::{offset::Utc, NaiveDate, NaiveTime};
-pub use diesel::{dsl::exists, mysql::MysqlConnection, prelude::*};
+pub use chrono::{offset::Utc, NaiveDate, NaiveDateTime, NaiveTime};
+pub use diesel::{dsl::exists, mysql::MysqlConnection, prelude::*, result::Error};
 use serenity::{framework::standard::CommandError, prelude::*};
 
 pub fn establish_connection() -> MysqlConnection {
@@ -28,7 +28,7 @@ pub fn create_game_entry(db_mutex: &Mutex<MysqlConnection>, guild: u64, todays_d
 pub fn create_post_entry(
     db_mutex: &Mutex<MysqlConnection>,
     post: u64,
-    time: NaiveTime,
+    time: NaiveDateTime,
     guild: u64,
     channel: u64,
 ) {
@@ -43,7 +43,7 @@ pub fn create_post_entry(
 
     let new_post = Post {
         post_id: post,
-        post_time: time,
+        post_datetime: time,
         game_id: game,
         guild_id: guild,
         guild_channel: channel,
@@ -143,13 +143,13 @@ pub fn get_submission_posts(
     all_posts
 }
 
-pub fn get_active_games(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<Game>, CommandError> {
+pub fn get_active_games(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<Game>, Error> {
     let conn = &*db_mutex.lock();
     let current_games: Vec<Game> = games::table.load::<Game>(conn)?;
     Ok(current_games)
 }
 
-pub fn clear_all_tables(db_mutex: &Mutex<MysqlConnection>) -> Result<(), CommandError> {
+pub fn clear_all_tables(db_mutex: &Mutex<MysqlConnection>) -> Result<(), Error> {
     let conn = &*db_mutex.lock();
     diesel::delete(posts::table).execute(conn)?;
     diesel::delete(leaderboard::table).execute(conn)?;
@@ -159,7 +159,7 @@ pub fn clear_all_tables(db_mutex: &Mutex<MysqlConnection>) -> Result<(), Command
 }
 
 // temp fix
-pub fn check_for_active_game(db_mutex: &Mutex<MysqlConnection>) -> Result<bool, CommandError> {
+pub fn check_for_active_game(db_mutex: &Mutex<MysqlConnection>) -> Result<bool, Error> {
     use crate::schema::games::columns::game_active;
     let conn = &*db_mutex.lock();
     let active_game: bool =
@@ -204,7 +204,7 @@ pub struct OldSubmission {
 #[table_name = "posts"]
 pub struct Post {
     pub post_id: u64,
-    pub post_time: NaiveTime,
+    pub post_datetime: NaiveDateTime,
     pub game_id: u32,
     pub guild_id: u64,
     pub guild_channel: u64,
