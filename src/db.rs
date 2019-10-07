@@ -99,8 +99,14 @@ pub fn create_submission_entry(
 
 pub fn get_leaderboard(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<OldSubmission>, Error> {
     let conn = &*db_mutex.lock();
-    let all_submissions: Vec<OldSubmission> =
+    let mut all_submissions: Vec<OldSubmission> =
         leaderboard::table.load::<OldSubmission>(conn).unwrap();
+    all_submissions.sort_by(|a, b| {
+        b.runner_time
+            .cmp(&a.runner_time)
+            .reverse()
+            .then(b.runner_collection.cmp(&a.runner_collection).reverse())
+    });
     Ok(all_submissions)
 }
 
@@ -118,14 +124,14 @@ pub fn get_leaderboard_ids(db_mutex: &Mutex<MysqlConnection>) -> Result<Vec<u64>
 pub fn get_leaderboard_posts(
     leaderboard_channel: &u64,
     db_mutex: &Mutex<MysqlConnection>,
-) -> Result<Vec<u64>, Error> {
-    use crate::schema::posts::columns::{guild_channel, post_id};
+) -> Result<Vec<Post>, Error> {
+    use crate::schema::posts::columns::guild_channel;
     let conn = &*db_mutex.lock();
-    let all_posts = posts::table
-        .filter(guild_channel.eq(*leaderboard_channel))
-        .select(post_id)
-        .load::<u64>(conn)
+    let mut all_posts = posts::table
+        .filter(guild_channel.eq(leaderboard_channel))
+        .load::<Post>(conn)
         .unwrap();
+    all_posts.sort_by(|a, b| b.post_datetime.cmp(&a.post_datetime).reverse());
     Ok(all_posts)
 }
 
@@ -135,10 +141,11 @@ pub fn get_submission_posts(
 ) -> Result<Vec<Post>, Error> {
     use crate::schema::posts::columns::guild_channel;
     let conn = &*db_mutex.lock();
-    let all_posts = posts::table
+    let mut all_posts = posts::table
         .filter(guild_channel.eq(*submission_channel))
         .load::<Post>(conn)
         .unwrap();
+    all_posts.sort_by(|a, b| b.post_datetime.cmp(&a.post_datetime).reverse());
     Ok(all_posts)
 }
 

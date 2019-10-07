@@ -20,7 +20,7 @@ use serenity::{
 use crate::db::{
     clear_all_tables, create_game_entry, create_post_entry, create_submission_entry,
     get_active_games, get_leaderboard, get_leaderboard_ids, get_leaderboard_posts,
-    get_submission_posts, Game, Post,
+    get_submission_posts, OldSubmission, Post,
 };
 use crate::error::{BotError, RoleError, SubmissionError};
 use crate::z3r;
@@ -76,6 +76,10 @@ impl EventHandler for Handler {
             [msg.content.as_str().bytes().nth(0).unwrap()] != "!".as_bytes()
             )
         {
+            info!(
+                "Received message from {}: \"{}\"",
+                &msg.author.name, &msg.content
+            );
             match process_time_submission(&ctx, &msg) {
                 Ok(()) => (),
                 Err(e) => {
@@ -91,8 +95,8 @@ impl EventHandler for Handler {
                     warn!("Error updating leaderboard: {}", e);
                     return;
                 }
-            }
-        };
+            };
+        }
     }
 
     fn ready(&self, _: Context, ready: Ready) {
@@ -127,7 +131,7 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         msg.delete(&ctx)?;
         return Ok(());
     }
-    //refresh(&ctx, msg)?;
+    refresh(ctx, &guild)?;
 
     // TODO: could parse/validate this better but this is good for now
     if args
@@ -175,6 +179,8 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
     )?;
     initialize_leaderboard(ctx, connection, guild.id.as_u64(), &game_string)?;
     msg.delete(&ctx)?;
+
+    info!("Game successfully started {}", &game_string);
     Ok(())
 }
 
@@ -216,87 +222,137 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         msg.delete(&ctx)?;
         return Ok(());
     }
-    let active_games: Vec<Game> = get_active_games(connection)?;
-    if active_games.len() >= 1 {
-        let mut moved_leaderboard = String::with_capacity(2000);
-        let mut submission_posts: Vec<Post> =
-            get_submission_posts(&submission_channel, connection)?;
-        submission_posts.sort_by(|a, b| b.post_datetime.cmp(&a.post_datetime).reverse());
-        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection)?;
-        let mut most_recent_submission_post: Message = ctx
-            .http
-            .get_message(submission_channel, submission_posts[0].post_id)?;
-
-        for i in leaderboard_posts {
-            let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i)?;
-            moved_leaderboard.push_str(&old_leaderboard_post.content);
-            old_leaderboard_post.delete(&ctx)?;
-        }
-
-        most_recent_submission_post.edit(&ctx, |x| x.content(moved_leaderboard))?;
-        // delete all posts in leaderboard channel
-        // add leaderboard to latest post in submission channel
-        // remove spoiler role from everyone who has it
-        // delete all db tables
-
-        let spoiler_role = get_spoiler_role(&guild)?;
-        let leaderboard_ids = get_leaderboard_ids(connection)?;
-        for id in leaderboard_ids {
-            let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
-            member.remove_role(&ctx, spoiler_role)?;
-        }
-    } else {
+    // let active_games: Vec<Game> = get_active_games(connection)?;
+    if get_active_games(connection)?.len() == 0 {
+        info!("Stop command used with no active games");
         return Ok(());
+    }
+
+    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, connection)?;
+    let first_lb_post = ctx
+        .http
+        .get_message(leaderboard_channel, leaderboard_posts[0].post_id)?;
+    let leaderboard_header = &first_lb_post.content.split("\n").collect::<Vec<&str>>()[0];
+    //let submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection)?;
+    let all_submissions: Vec<OldSubmission> = match get_leaderboard(connection) {
+        Ok(leaderboard) => leaderboard,
+        Err(e) => {
+            warn!("Error getting leaderboard submissios from db: {}", e);
+            return Ok(());
+        }
+    };
+    let lb_string_allocation: usize = (&all_submissions.len() * 40) + 150;
+    let mut leaderboard_string = String::with_capacity(lb_string_allocation);
+    let mut runner_position: u32 = 1;
+    leaderboard_string.push_str(format!("{}\n", leaderboard_header).as_str());
+    all_submissions
+        .iter()
+        .filter(|&f| f.runner_forfeit == false)
+        .for_each(|s| {
+            leaderboard_string.push_str(
+                format!(
+                    "\n{}) {} - {} - {}/216",
+                    runner_position, s.runner_name, s.runner_time, s.runner_collection
+                )
+                .as_str(),
+            );
+            runner_position += 1;
+        });
+
+    fill_leaderboard_refresh(ctx, connection, leaderboard_string, submission_channel)?;
+
+    for i in leaderboard_posts {
+        let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i.post_id)?;
+        old_leaderboard_post.delete(&ctx)?;
+    }
+
+    let spoiler_role = get_spoiler_role(&guild)?;
+    let leaderboard_ids = get_leaderboard_ids(connection)?;
+    for id in leaderboard_ids {
+        let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
+        member.remove_role(&ctx, spoiler_role)?;
     }
 
     clear_all_tables(connection)?;
     msg.delete(&ctx)?;
+
+    info!("Game successfully stopped");
     Ok(())
 }
 
-//fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
-//    let _guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
-//    let data = ctx.data.read();
-//    let connection = data
-//        .get::<DBConnectionContainer>()
-//        .expect("Expected DB connection in ShareMap.");
-//    let leaderboard_channel: u64 = *data
-//        .get::<ChannelsContainer>()
-//        .expect("No submission channel in the environment")
-//        .get("leaderboard_channel")
-//        .unwrap()
-//        .as_u64();
-//    let submission_channel: u64 = *data
-//        .get::<ChannelsContainer>()
-//        .expect("No submission channel in the environment")
-//        .get("submission_channel")
-//        .unwrap()
-//        .as_u64();
-//    let active_games: Vec<Game> = get_active_games(connection)?;
-//    if active_games.len() >= 1 {
-//        let mut moved_leaderboard = String::with_capacity(2000);
-//        let mut submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection);
-//        submission_posts.sort_by(|a, b| b.post_time.cmp(&a.post_time));
-//        let leaderboard_posts: Vec<u64> = get_leaderboard_posts(&leaderboard_channel, connection);
-//        let mut most_recent_submission_post: Message = ctx
-//            .http
-//            .get_message(submission_channel, submission_posts[0].post_id)?;
-//
-//        for i in leaderboard_posts {
-//            let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i)?;
-//            moved_leaderboard.push_str(&old_leaderboard_post.content);
-//            old_leaderboard_post.delete(ctx)?;
-//        }
-//
-//        most_recent_submission_post.edit(ctx, |x| x.content(moved_leaderboard))?;
-//        // delete all posts in leaderboard channel
-//        // add leaderboard to latest post in submission channel
-//        // remove spoiler role from everyone who has it
-//        // delete all db tables
-//    }
-//
-//    Ok(())
-//}
+fn refresh(ctx: &Context, guild: &PartialGuild) -> Result<(), BotError> {
+    let data = ctx.data.read();
+    let connection = data
+        .get::<DBConnectionContainer>()
+        .expect("Expected DB connection in ShareMap.");
+
+    let leaderboard_channel: u64 = *data
+        .get::<ChannelsContainer>()
+        .expect("No leaderboard channel in the environment")
+        .get("leaderboard_channel")
+        .unwrap()
+        .as_u64();
+    let submission_channel: u64 = *data
+        .get::<ChannelsContainer>()
+        .expect("No submission channel in the environment")
+        .get("submission_channel")
+        .unwrap()
+        .as_u64();
+    if get_active_games(connection)?.len() == 0 {
+        return Ok(());
+    }
+
+    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, connection)?;
+    let first_lb_post = ctx
+        .http
+        .get_message(leaderboard_channel, leaderboard_posts[0].post_id)?;
+    let leaderboard_header = &first_lb_post.content.split("\n").collect::<Vec<&str>>()[0];
+    //let submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection)?;
+    let all_submissions: Vec<OldSubmission> = match get_leaderboard(connection) {
+        Ok(leaderboard) => leaderboard,
+        Err(e) => {
+            warn!("Error getting leaderboard submissios from db: {}", e);
+            return Ok(());
+        }
+    };
+    let lb_string_allocation: usize = (&all_submissions.len() * 40) + 150;
+    let mut leaderboard_string = String::with_capacity(lb_string_allocation);
+    let mut runner_position: u32 = 1;
+    leaderboard_string.push_str(format!("{}\n", leaderboard_header).as_str());
+    all_submissions
+        .iter()
+        .filter(|&f| f.runner_forfeit == false)
+        .for_each(|s| {
+            leaderboard_string.push_str(
+                format!(
+                    "\n{}) {} - {} - {}/216",
+                    runner_position, s.runner_name, s.runner_time, s.runner_collection
+                )
+                .as_str(),
+            );
+            runner_position += 1;
+        });
+
+    fill_leaderboard_refresh(ctx, connection, leaderboard_string, submission_channel)?;
+
+    for i in leaderboard_posts {
+        let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i.post_id)?;
+        old_leaderboard_post.delete(ctx)?;
+    }
+
+    let spoiler_role = get_spoiler_role(&guild)?;
+    let leaderboard_ids = get_leaderboard_ids(connection)?;
+    for id in leaderboard_ids {
+        let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
+        member.remove_role(ctx, spoiler_role)?;
+    }
+
+    clear_all_tables(connection)?;
+
+    info!("Game successfully refreshed");
+    Ok(())
+}
+
 fn get_admin_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     let admin_role = guild.role_by_name(
         env::var("DISCORD_ADMIN_ROLE")
@@ -315,7 +371,7 @@ fn get_spoiler_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     Ok(spoiler_role.unwrap().id)
 }
 
-pub fn get_channels() -> Result<HashMap<&'static str, ChannelId>, serenity::Error> {
+pub fn get_channels_from_env() -> Result<HashMap<&'static str, ChannelId>, serenity::Error> {
     let mut bot_channels: HashMap<&'static str, ChannelId> = HashMap::with_capacity(3);
     bot_channels.insert(
         "submission_channel",
@@ -400,7 +456,7 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
         Ok(submission_time) => submission_time,
         Err(_e) => {
             info!(
-                "Processing submission: Incorrectly formatted time from {} : {}",
+                "Processing submission: Incorrectly formatted time from {}: {}",
                 &msg.author.name, &maybe_time
             );
             return Ok(());
@@ -449,6 +505,11 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
         submission_collect,
         false,
     )?;
+
+    info!(
+        "Submission successfully accepted: {} {} {}",
+        runner_name, submission_time, submission_collect
+    );
     Ok(())
 }
 
@@ -497,33 +558,59 @@ fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
         .unwrap()
         .as_u64();
 
-    let mut all_submissions = get_leaderboard(connection)?;
-    let leaderboard_posts = get_leaderboard_posts(&leaderboard_channel, connection)?;
-    all_submissions.sort_by(|a, b| b.runner_time.cmp(&a.runner_time).reverse());
-    if all_submissions.len() <= 50 {
-        let mut post = ctx
-            .http
-            .get_message(leaderboard_channel, leaderboard_posts[0])
-            .unwrap();
-        let mut edit_string = String::new();
-        let mut runner_position: u32 = 0;
-        let leaderboard_header = &post.content.split("\n").collect::<Vec<&str>>()[0];
-        edit_string.push_str(leaderboard_header);
-        for i in all_submissions {
-            if i.runner_forfeit != true {
-                runner_position += 1;
-                edit_string.push_str(
-                    format!(
-                        "\n{}) {} - {} - {}/216",
-                        runner_position, i.runner_name, i.runner_time, i.runner_collection
-                    )
-                    .as_str(),
-                )
-            }
+    let all_submissions: Vec<OldSubmission> = match get_leaderboard(connection) {
+        Ok(leaderboard) => leaderboard,
+        Err(e) => {
+            warn!("Error getting leaderboard submissios from db: {}", e);
+            return Ok(());
         }
+    };
 
-        post.edit(ctx, |x| x.content(edit_string)).unwrap();
-    }
+    let leaderboard_posts: Vec<Post> = match get_leaderboard_posts(&leaderboard_channel, connection)
+    {
+        Ok(posts) => posts,
+        Err(e) => {
+            warn!("Error retrieving leaderboard post data from db: {}", e);
+            return Ok(());
+        }
+    };
+
+    let lb_string_allocation: usize = (&all_submissions.len() * 40) + 150;
+    let mut leaderboard_string = String::with_capacity(lb_string_allocation);
+    let first_post = match ctx
+        .http
+        .get_message(leaderboard_channel, leaderboard_posts[0].post_id)
+    {
+        Ok(post) => post,
+        Err(e) => {
+            warn!("Error retrieving leaderboard header: {}", e);
+            return Ok(());
+        }
+    };
+    let leaderboard_header = &first_post.content.split("\n").collect::<Vec<&str>>()[0];
+    let mut runner_position: u32 = 1;
+    leaderboard_string.push_str(format!("{}\n", leaderboard_header).as_str());
+    all_submissions
+        .iter()
+        .filter(|&f| f.runner_forfeit == false)
+        .for_each(|s| {
+            leaderboard_string.push_str(
+                format!(
+                    "\n{}) {} - {} - {}/216",
+                    runner_position, s.runner_name, s.runner_time, s.runner_collection
+                )
+                .as_str(),
+            );
+            runner_position += 1;
+        });
+
+    fill_leaderboard_update(
+        ctx,
+        connection,
+        leaderboard_string,
+        leaderboard_posts,
+        leaderboard_channel,
+    )?;
 
     Ok(())
 }
@@ -532,7 +619,151 @@ fn set_game_active(ctx: &mut Context, toggle: bool) {
     let mut data = ctx.data.write();
     *data
         .get_mut::<ActiveGames>()
-        .expect("No active games toggle in context.") = toggle;
+        .expect("No active games toggle in ShareMap.") = toggle;
+}
+
+fn resize_leaderboard(
+    ctx: &Context,
+    connection: &Mutex<MysqlConnection>,
+    leaderboard_channel: u64,
+    new_posts: usize,
+) -> Result<Vec<Post>, BotError> {
+    // we need one more post than we have to hold all submissions
+    for _n in 0..new_posts {
+        let new_message = ChannelId::from(leaderboard_channel).say(&ctx.http, "Placeholder")?;
+        create_post_entry(
+            connection,
+            *new_message.id.as_u64(),
+            Utc::now().naive_utc(),
+            *new_message.guild_id.unwrap().as_u64(),
+            *new_message.channel_id.as_u64(),
+        )?;
+    }
+    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, connection)?;
+
+    Ok(leaderboard_posts)
+}
+
+fn fill_leaderboard_update(
+    ctx: &Context,
+    connection: &Mutex<MysqlConnection>,
+    leaderboard_string: String,
+    mut leaderboard_posts: Vec<Post>,
+    channel: u64,
+) -> Result<(), BotError> {
+    let necessary_posts: usize = leaderboard_string.len() / 2000 + 1;
+
+    if necessary_posts > leaderboard_posts.len() {
+        let new_posts: usize = leaderboard_posts.len() - necessary_posts;
+        leaderboard_posts = match resize_leaderboard(ctx, connection, channel, new_posts) {
+            Ok(posts) => posts,
+            Err(e) => {
+                warn!("Error resizing leaderboard: {}", e);
+                return Ok(());
+            }
+        };
+    }
+
+    // fill buffer then send the post until there's no more
+    let mut post_buffer = String::with_capacity(2000);
+    let mut post_iterator = leaderboard_posts.into_iter().peekable();
+    let mut submission_iterator = leaderboard_string
+        .split("\n")
+        .collect::<Vec<&str>>()
+        .into_iter()
+        .peekable();
+
+    loop {
+        if post_iterator.peek().is_none() {
+            warn!("Error: Ran out of space for leaderboard");
+            break;
+        }
+
+        match submission_iterator.peek() {
+            Some(line) => {
+                if line.len() + &post_buffer.len() <= 2000 {
+                    post_buffer
+                        .push_str(format!("\n{}", submission_iterator.next().unwrap()).as_str())
+                } else if line.len() + post_buffer.len() > 2000 {
+                    let mut post = ctx
+                        .http
+                        .get_message(channel, post_iterator.next().unwrap().post_id)?;
+                    post.edit(ctx, |x| x.content(&post_buffer))?;
+                    post_buffer.clear();
+                }
+            }
+            None => {
+                let mut post = ctx
+                    .http
+                    .get_message(channel, post_iterator.next().unwrap().post_id)?;
+                post.edit(ctx, |x| x.content(post_buffer))?;
+                break;
+            }
+        };
+    }
+
+    Ok(())
+}
+
+fn fill_leaderboard_refresh(
+    ctx: &Context,
+    connection: &Mutex<MysqlConnection>,
+    leaderboard_string: String,
+    channel: u64,
+) -> Result<(), BotError> {
+    let necessary_posts: usize = leaderboard_string.len() / 2000 + 1;
+    if necessary_posts > 1 {
+        for _n in 1..necessary_posts {
+            let new_message = ChannelId::from(channel).say(&ctx.http, "Placeholder")?;
+            create_post_entry(
+                connection,
+                *new_message.id.as_u64(),
+                Utc::now().naive_utc(),
+                *new_message.guild_id.unwrap().as_u64(),
+                *new_message.channel_id.as_u64(),
+            )?;
+        }
+    }
+    let submission_posts = get_submission_posts(&channel, connection)?;
+    // fill buffer then send the post until there's no more
+    let mut post_buffer = String::with_capacity(2000);
+    let mut post_iterator = submission_posts.into_iter().peekable();
+    let mut submission_iterator = leaderboard_string
+        .split("\n")
+        .collect::<Vec<&str>>()
+        .into_iter()
+        .peekable();
+
+    loop {
+        if post_iterator.peek().is_none() {
+            warn!("Error: Ran out of space moving leaderboard to submission channel");
+            break;
+        }
+
+        match submission_iterator.peek() {
+            Some(line) => {
+                if line.len() + &post_buffer.len() <= 2000 {
+                    post_buffer
+                        .push_str(format!("\n{}", submission_iterator.next().unwrap()).as_str())
+                } else if line.len() + post_buffer.len() > 2000 {
+                    let mut post = ctx
+                        .http
+                        .get_message(channel, post_iterator.next().unwrap().post_id)?;
+                    post.edit(ctx, |x| x.content(&post_buffer))?;
+                    post_buffer.clear();
+                }
+            }
+            None => {
+                let mut post = ctx
+                    .http
+                    .get_message(channel, post_iterator.next().unwrap().post_id)?;
+                post.edit(ctx, |x| x.content(post_buffer))?;
+                break;
+            }
+        };
+    }
+
+    Ok(())
 }
 
 group!({

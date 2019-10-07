@@ -37,6 +37,13 @@ impl From<diesel::result::Error> for BotError {
     }
 }
 
+impl From<RoleError> for BotError {
+    fn from(err: RoleError) -> Self {
+        BotError::new(err.description())
+    }
+}
+
+#[derive(Debug)]
 pub struct RoleError {
     details: String,
 }
@@ -48,7 +55,11 @@ impl RoleError {
         }
     }
 }
-
+impl Error for RoleError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
 impl fmt::Display for RoleError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.details)

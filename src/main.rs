@@ -36,7 +36,7 @@ fn main() -> Result<(), BotError> {
         let mut data = client.data.write();
         let db_connection = Mutex::new(db::establish_connection(&database_url)?);
         let active_game: bool = db::check_for_active_game(&db_connection)?;
-        let channels: HashMap<&'static str, ChannelId> = discord::get_channels()?;
+        let channels: HashMap<&'static str, ChannelId> = discord::get_channels_from_env()?;
         data.insert::<DBConnectionContainer>(db_connection);
         data.insert::<ActiveGames>(active_game);
         data.insert::<ChannelsContainer>(channels);
