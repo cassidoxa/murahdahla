@@ -1,6 +1,6 @@
 [package]
 name = "murahdahla"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["cassidoxa <cassidymoen@gmx.com>"]
 edition = "2018"
 
@@ -17,7 +17,7 @@ serde_json = "1.0.40"
 [dependencies.diesel]
 version = "1.4.2"
 default-features = false
-features = ["mysql", "chrono"]
+features = ["mysql", "chrono", "r2d2"]
 
 [dependencies.serenity]
 version = "0.7.1"

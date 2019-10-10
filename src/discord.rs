@@ -1,7 +1,10 @@
 use std::{collections::HashMap, env};
 
 use chrono::{offset::Utc, NaiveDateTime, NaiveTime};
-use diesel::mysql::MysqlConnection;
+use diesel::{
+    mysql::MysqlConnection,
+    r2d2::{ConnectionManager, Pool},
+};
 
 use serenity::{
     framework::standard::{
@@ -10,6 +13,7 @@ use serenity::{
     },
     model::{
         channel::Message,
+        event::ResumedEvent,
         gateway::Ready,
         guild::PartialGuild,
         id::{ChannelId, RoleId},
@@ -84,11 +88,11 @@ impl EventHandler for Handler {
                 Ok(()) => (),
                 Err(e) => {
                     warn!("Error processing time submission: {}", e);
-                    return;
                 }
             };
 
-            msg.delete(&ctx).unwrap();
+            msg.delete(&ctx)
+                .unwrap_or_else(|e| info!("Error deleting message: {}", e));
             match update_leaderboard(&ctx) {
                 Ok(()) => (),
                 Err(e) => {
@@ -102,10 +106,15 @@ impl EventHandler for Handler {
     fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
     }
+
+    fn resume(&self, _: Context, _: ResumedEvent) {
+        info!("Resumed");
+    }
 }
 
 #[command]
 fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
+    msg.delete(&ctx)?;
     let todays_date = Utc::today().naive_utc();
     let current_time: NaiveDateTime = Utc::now().naive_utc();
     let guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
@@ -131,6 +140,7 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         msg.delete(&ctx)?;
         return Ok(());
     }
+
     refresh(ctx, &guild)?;
 
     // TODO: could parse/validate this better but this is good for now
@@ -141,11 +151,9 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         .find(|x| x.to_string() == "alttpr.com")
         == None
     {
-        msg.delete(&ctx)?;
         return Ok(());
     }
 
-    msg.delete(&ctx)?;
     let game_hash: &str = args
         .rest()
         .split("/")
@@ -158,39 +166,38 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
     let post_id: u64 = match post_id_result {
         Ok(post_id_result) => *post_id_result.id.as_u64(),
         Err(_post_id_result) => {
-            msg.delete(&ctx)?;
             return Ok(());
         }
     };
 
     set_game_active(ctx, true);
     let data = ctx.data.read();
-    let connection = data
+    let db_pool = data
         .get::<DBConnectionContainer>()
         .expect("Expected DB connection in ShareMap.");
 
-    create_game_entry(connection, *guild.id.as_u64(), &todays_date);
+    create_game_entry(db_pool, *guild.id.as_u64(), &todays_date);
     create_post_entry(
-        connection,
+        db_pool,
         post_id,
         current_time,
         *guild.id.as_u64(),
         *msg.channel_id.as_u64(),
     )?;
-    initialize_leaderboard(ctx, connection, guild.id.as_u64(), &game_string)?;
-    msg.delete(&ctx)?;
+    initialize_leaderboard(ctx, db_pool, guild.id.as_u64(), &game_string)?;
 
-    info!("Game successfully started {}", &game_string);
+    info!("Game successfully started");
     Ok(())
 }
 
 #[command]
 fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
+    msg.delete(&ctx)?;
     let guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
     let admin_role = get_admin_role(&guild)?;
     set_game_active(ctx, false);
     let data = ctx.data.read();
-    let connection = data
+    let db_pool = data
         .get::<DBConnectionContainer>()
         .expect("Expected DB connection in ShareMap.");
     let leaderboard_channel: u64 = *data
@@ -207,7 +214,6 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         .as_u64();
 
     if *msg.channel_id.as_u64() != submission_channel {
-        msg.delete(&ctx)?;
         return Ok(());
     }
     if msg
@@ -219,22 +225,21 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
         .find(|x| x.as_u64() == admin_role.as_u64())
         == None
     {
-        msg.delete(&ctx)?;
         return Ok(());
     }
     // let active_games: Vec<Game> = get_active_games(connection)?;
-    if get_active_games(connection)?.len() == 0 {
+    if get_active_games(db_pool)?.len() == 0 {
         info!("Stop command used with no active games");
         return Ok(());
     }
 
-    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, connection)?;
+    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, db_pool)?;
     let first_lb_post = ctx
         .http
         .get_message(leaderboard_channel, leaderboard_posts[0].post_id)?;
     let leaderboard_header = &first_lb_post.content.split("\n").collect::<Vec<&str>>()[0];
     //let submission_posts: Vec<Post> = get_submission_posts(&submission_channel, connection)?;
-    let all_submissions: Vec<OldSubmission> = match get_leaderboard(connection) {
+    let all_submissions: Vec<OldSubmission> = match get_leaderboard(db_pool) {
         Ok(leaderboard) => leaderboard,
         Err(e) => {
             warn!("Error getting leaderboard submissios from db: {}", e);
@@ -259,7 +264,7 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
             runner_position += 1;
         });
 
-    fill_leaderboard_refresh(ctx, connection, leaderboard_string, submission_channel)?;
+    fill_leaderboard_refresh(ctx, db_pool, leaderboard_string, submission_channel)?;
 
     for i in leaderboard_posts {
         let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i.post_id)?;
@@ -267,14 +272,13 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
     }
 
     let spoiler_role = get_spoiler_role(&guild)?;
-    let leaderboard_ids = get_leaderboard_ids(connection)?;
+    let leaderboard_ids = get_leaderboard_ids(db_pool)?;
     for id in leaderboard_ids {
         let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
         member.remove_role(&ctx, spoiler_role)?;
     }
 
-    clear_all_tables(connection)?;
-    msg.delete(&ctx)?;
+    clear_all_tables(db_pool)?;
 
     info!("Game successfully stopped");
     Ok(())
@@ -423,9 +427,9 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
         msg.content.as_str().trim_end().split_whitespace().collect();
 
     let data = ctx.data.read();
-    let connection = data
+    let db_pool = data
         .get::<DBConnectionContainer>()
-        .expect("Expected DB connection in ShareMap. Please check environment variables.");
+        .expect("Expected DB pool in ShareMap. Please check environment variables.");
 
     let ff = vec!["ff", "FF", "forfeit", "Forfeit"];
     if ff.iter().any(|&x| x == maybe_submission[0]) {
@@ -438,7 +442,7 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
             }
         };
         create_submission_entry(
-            connection,
+            db_pool,
             runner_name,
             *runner_id.as_u64(),
             NaiveTime::from_hms(0, 0, 0),
@@ -498,7 +502,7 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     };
 
     create_submission_entry(
-        connection,
+        db_pool,
         runner_name,
         *runner_id.as_u64(),
         submission_time,
@@ -515,7 +519,7 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
 
 fn initialize_leaderboard(
     ctx: &Context,
-    db_mutex: &Mutex<MysqlConnection>,
+    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     guild_id: &u64,
     game_string: &str,
 ) -> Result<(), BotError> {
@@ -526,7 +530,7 @@ fn initialize_leaderboard(
         .expect("No submission channel in the environment")
         .get("leaderboard_channel")
         .unwrap();
-    let leaderboard_string = format!("{} {}", "Leaderboard for", game_string);
+    let leaderboard_string = format!("{} {}", "Leaderboard for", &game_string);
     let leaderboard_post_id = match leaderboard_channel.say(&ctx.http, leaderboard_string) {
         Ok(leaderboard_message) => *leaderboard_message.id.as_u64(),
         Err(e) => {
@@ -536,7 +540,7 @@ fn initialize_leaderboard(
     };
 
     create_post_entry(
-        db_mutex,
+        db_pool,
         leaderboard_post_id,
         current_time,
         *guild_id,
@@ -548,9 +552,9 @@ fn initialize_leaderboard(
 
 fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
     let data = ctx.data.read();
-    let connection = data
+    let db_pool = data
         .get::<DBConnectionContainer>()
-        .expect("Expected DB connection in ShareMap.");
+        .expect("Expected DB pool in ShareMap.");
     let leaderboard_channel: u64 = *data
         .get::<ChannelsContainer>()
         .expect("No submission channel in the environment")
@@ -558,7 +562,7 @@ fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
         .unwrap()
         .as_u64();
 
-    let all_submissions: Vec<OldSubmission> = match get_leaderboard(connection) {
+    let all_submissions: Vec<OldSubmission> = match get_leaderboard(db_pool) {
         Ok(leaderboard) => leaderboard,
         Err(e) => {
             warn!("Error getting leaderboard submissios from db: {}", e);
@@ -566,8 +570,7 @@ fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
         }
     };
 
-    let leaderboard_posts: Vec<Post> = match get_leaderboard_posts(&leaderboard_channel, connection)
-    {
+    let leaderboard_posts: Vec<Post> = match get_leaderboard_posts(&leaderboard_channel, db_pool) {
         Ok(posts) => posts,
         Err(e) => {
             warn!("Error retrieving leaderboard post data from db: {}", e);
@@ -606,7 +609,7 @@ fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
 
     fill_leaderboard_update(
         ctx,
-        connection,
+        db_pool,
         leaderboard_string,
         leaderboard_posts,
         leaderboard_channel,
@@ -624,7 +627,7 @@ fn set_game_active(ctx: &mut Context, toggle: bool) {
 
 fn resize_leaderboard(
     ctx: &Context,
-    connection: &Mutex<MysqlConnection>,
+    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     leaderboard_channel: u64,
     new_posts: usize,
 ) -> Result<Vec<Post>, BotError> {
@@ -632,21 +635,21 @@ fn resize_leaderboard(
     for _n in 0..new_posts {
         let new_message = ChannelId::from(leaderboard_channel).say(&ctx.http, "Placeholder")?;
         create_post_entry(
-            connection,
+            db_pool,
             *new_message.id.as_u64(),
             Utc::now().naive_utc(),
             *new_message.guild_id.unwrap().as_u64(),
             *new_message.channel_id.as_u64(),
         )?;
     }
-    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, connection)?;
+    let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, db_pool)?;
 
     Ok(leaderboard_posts)
 }
 
 fn fill_leaderboard_update(
     ctx: &Context,
-    connection: &Mutex<MysqlConnection>,
+    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     leaderboard_string: String,
     mut leaderboard_posts: Vec<Post>,
     channel: u64,
@@ -655,7 +658,7 @@ fn fill_leaderboard_update(
 
     if necessary_posts > leaderboard_posts.len() {
         let new_posts: usize = leaderboard_posts.len() - necessary_posts;
-        leaderboard_posts = match resize_leaderboard(ctx, connection, channel, new_posts) {
+        leaderboard_posts = match resize_leaderboard(ctx, db_pool, channel, new_posts) {
             Ok(posts) => posts,
             Err(e) => {
                 warn!("Error resizing leaderboard: {}", e);
@@ -707,7 +710,7 @@ fn fill_leaderboard_update(
 
 fn fill_leaderboard_refresh(
     ctx: &Context,
-    connection: &Mutex<MysqlConnection>,
+    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     leaderboard_string: String,
     channel: u64,
 ) -> Result<(), BotError> {
@@ -716,7 +719,7 @@ fn fill_leaderboard_refresh(
         for _n in 1..necessary_posts {
             let new_message = ChannelId::from(channel).say(&ctx.http, "Placeholder")?;
             create_post_entry(
-                connection,
+                db_pool,
                 *new_message.id.as_u64(),
                 Utc::now().naive_utc(),
                 *new_message.guild_id.unwrap().as_u64(),
@@ -724,7 +727,7 @@ fn fill_leaderboard_refresh(
             )?;
         }
     }
-    let submission_posts = get_submission_posts(&channel, connection)?;
+    let submission_posts = get_submission_posts(&channel, db_pool)?;
     // fill buffer then send the post until there's no more
     let mut post_buffer = String::with_capacity(2000);
     let mut post_iterator = submission_posts.into_iter().peekable();
@@ -775,7 +778,7 @@ group!({
 pub struct DBConnectionContainer;
 
 impl TypeMapKey for DBConnectionContainer {
-    type Value = Mutex<MysqlConnection>;
+    type Value = Pool<ConnectionManager<MysqlConnection>>;
 }
 
 pub struct ChannelsContainer;
