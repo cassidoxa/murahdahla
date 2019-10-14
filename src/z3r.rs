@@ -1,13 +1,12 @@
 use chrono::naive::NaiveDate;
 use fnv::FnvHashMap;
 use serde_json::{from_value, Value};
-use serenity::framework::standard::CommandError;
 
 pub fn get_game_string(
     game_id: &str,
     url: &str,
     todays_date: &NaiveDate,
-) -> Result<String, CommandError> {
+) -> reqwest::Result<String> {
     // TODO: .unwrap() is a bad practice, maybe needs better error handling,
     // but should work in all cases for v31 games
     let url_string: String = format!(
@@ -37,7 +36,6 @@ pub fn get_game_string(
         .as_str()
         .unwrap();
     let code: Vec<&str> = get_code(&game_json["patch"]);
-    //    let dungeon_items = match &*game_json["spoiler"]["meta"]["dungeon_items"].as_str().unwrap() {
 
     let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
         .as_str()

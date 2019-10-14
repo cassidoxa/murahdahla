@@ -93,7 +93,7 @@ impl EventHandler for Handler {
 
             msg.delete(&ctx)
                 .unwrap_or_else(|e| info!("Error deleting message: {}", e));
-            match update_leaderboard(&ctx) {
+            match update_leaderboard(&ctx, *guild_id.as_u64()) {
                 Ok(()) => (),
                 Err(e) => {
                     warn!("Error updating leaderboard: {}", e);
@@ -264,7 +264,13 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
             runner_position += 1;
         });
 
-    fill_leaderboard_refresh(ctx, db_pool, leaderboard_string, submission_channel)?;
+    fill_leaderboard_refresh(
+        ctx,
+        db_pool,
+        *guild.id.as_u64(),
+        leaderboard_string,
+        submission_channel,
+    )?;
 
     for i in leaderboard_posts {
         let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i.post_id)?;
@@ -337,7 +343,13 @@ fn refresh(ctx: &Context, guild: &PartialGuild) -> Result<(), BotError> {
             runner_position += 1;
         });
 
-    fill_leaderboard_refresh(ctx, connection, leaderboard_string, submission_channel)?;
+    fill_leaderboard_refresh(
+        ctx,
+        connection,
+        *guild.id.as_u64(),
+        leaderboard_string,
+        submission_channel,
+    )?;
 
     for i in leaderboard_posts {
         let old_leaderboard_post: Message = ctx.http.get_message(leaderboard_channel, i.post_id)?;
@@ -550,7 +562,7 @@ fn initialize_leaderboard(
     Ok(())
 }
 
-fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
+fn update_leaderboard(ctx: &Context, guild_id: u64) -> Result<(), BotError> {
     let data = ctx.data.read();
     let db_pool = data
         .get::<DBConnectionContainer>()
@@ -610,6 +622,7 @@ fn update_leaderboard(ctx: &Context) -> Result<(), BotError> {
     fill_leaderboard_update(
         ctx,
         db_pool,
+        guild_id,
         leaderboard_string,
         leaderboard_posts,
         leaderboard_channel,
@@ -628,17 +641,19 @@ fn set_game_active(ctx: &mut Context, toggle: bool) {
 fn resize_leaderboard(
     ctx: &Context,
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    guild_id: u64,
     leaderboard_channel: u64,
     new_posts: usize,
 ) -> Result<Vec<Post>, BotError> {
     // we need one more post than we have to hold all submissions
     for _n in 0..new_posts {
-        let new_message = ChannelId::from(leaderboard_channel).say(&ctx.http, "Placeholder")?;
+        let new_message: Message =
+            ChannelId::from(leaderboard_channel).say(&ctx.http, "Placeholder")?;
         create_post_entry(
             db_pool,
             *new_message.id.as_u64(),
             Utc::now().naive_utc(),
-            *new_message.guild_id.unwrap().as_u64(),
+            guild_id,
             *new_message.channel_id.as_u64(),
         )?;
     }
@@ -650,6 +665,7 @@ fn resize_leaderboard(
 fn fill_leaderboard_update(
     ctx: &Context,
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    guild_id: u64,
     leaderboard_string: String,
     mut leaderboard_posts: Vec<Post>,
     channel: u64,
@@ -657,8 +673,8 @@ fn fill_leaderboard_update(
     let necessary_posts: usize = leaderboard_string.len() / 2000 + 1;
 
     if necessary_posts > leaderboard_posts.len() {
-        let new_posts: usize = leaderboard_posts.len() - necessary_posts;
-        leaderboard_posts = match resize_leaderboard(ctx, db_pool, channel, new_posts) {
+        let new_posts: usize = necessary_posts - leaderboard_posts.len();
+        leaderboard_posts = match resize_leaderboard(ctx, db_pool, guild_id, channel, new_posts) {
             Ok(posts) => posts,
             Err(e) => {
                 warn!("Error resizing leaderboard: {}", e);
@@ -711,6 +727,7 @@ fn fill_leaderboard_update(
 fn fill_leaderboard_refresh(
     ctx: &Context,
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    guild_id: u64,
     leaderboard_string: String,
     channel: u64,
 ) -> Result<(), BotError> {
@@ -722,7 +739,7 @@ fn fill_leaderboard_refresh(
                 db_pool,
                 *new_message.id.as_u64(),
                 Utc::now().naive_utc(),
-                *new_message.guild_id.unwrap().as_u64(),
+                guild_id,
                 *new_message.channel_id.as_u64(),
             )?;
         }
