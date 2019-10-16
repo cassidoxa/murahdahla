@@ -280,8 +280,17 @@ fn stop(ctx: &mut Context, msg: &Message) -> CommandResult {
     let spoiler_role = get_spoiler_role(&guild)?;
     let leaderboard_ids = get_leaderboard_ids(db_pool)?;
     for id in leaderboard_ids {
-        let member = &mut ctx.http.get_member(*guild.id.as_u64(), id)?;
-        member.remove_role(&ctx, spoiler_role)?;
+        let mut member = match ctx.http.get_member(*guild.id.as_u64(), id) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Error getting member from id in leaderboard: {}", e);
+                continue;
+            }
+        };
+        match &member.remove_role(&ctx, spoiler_role) {
+            Ok(()) => (),
+            Err(e) => warn!("Error removing role: {}", e),
+        };
     }
 
     clear_all_tables(db_pool)?;
