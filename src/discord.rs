@@ -378,6 +378,7 @@ fn refresh(ctx: &Context, guild: &PartialGuild) -> Result<(), BotError> {
     Ok(())
 }
 
+#[inline]
 fn get_admin_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     let admin_role = guild.role_by_name(
         env::var("DISCORD_ADMIN_ROLE")
@@ -387,6 +388,7 @@ fn get_admin_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     Ok(admin_role.unwrap().id)
 }
 
+#[inline]
 fn get_spoiler_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     let spoiler_role = guild.role_by_name(
         env::var("DISCORD_SPOILER_ROLE")
@@ -396,6 +398,7 @@ fn get_spoiler_role(guild: &PartialGuild) -> Result<RoleId, RoleError> {
     Ok(spoiler_role.unwrap().id)
 }
 
+#[inline]
 pub fn get_channels_from_env() -> Result<HashMap<&'static str, ChannelId>, serenity::Error> {
     let mut bot_channels: HashMap<&'static str, ChannelId> = HashMap::with_capacity(3);
     bot_channels.insert(
@@ -572,6 +575,7 @@ fn initialize_leaderboard(
 }
 
 fn update_leaderboard(ctx: &Context, guild_id: u64) -> Result<(), BotError> {
+    let current_time: NaiveDateTime = Utc::now().naive_utc();
     let data = ctx.data.read();
     let db_pool = data
         .get::<DBConnectionContainer>()
@@ -618,14 +622,25 @@ fn update_leaderboard(ctx: &Context, guild_id: u64) -> Result<(), BotError> {
         .iter()
         .filter(|&f| f.runner_forfeit == false)
         .for_each(|s| {
-            leaderboard_string.push_str(
-                format!(
-                    "\n{}) {} - {} - {}/216",
-                    runner_position, s.runner_name, s.runner_time, s.runner_collection
-                )
-                .as_str(),
-            );
-            runner_position += 1;
+            if &current_time.timestamp() - s.submission_datetime.timestamp() > 21600 {
+                leaderboard_string.push_str(
+                    format!(
+                        "\n{}) {} - {} - {}/216",
+                        runner_position, s.runner_name, s.runner_time, s.runner_collection
+                    )
+                    .as_str(),
+                );
+                runner_position += 1;
+            } else {
+                leaderboard_string.push_str(
+                    format!(
+                        "\n{}) *{}* - {} - {}/216",
+                        runner_position, s.runner_name, s.runner_time, s.runner_collection
+                    )
+                    .as_str(),
+                );
+                runner_position += 1;
+            }
         });
 
     fill_leaderboard_update(

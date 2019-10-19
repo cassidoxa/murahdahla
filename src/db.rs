@@ -8,6 +8,7 @@ pub use diesel::{
     result::Error,
 };
 
+#[inline]
 pub fn establish_pool(
     database_url: &str,
 ) -> Result<Pool<ConnectionManager<MysqlConnection>>, Error> {
@@ -19,6 +20,7 @@ pub fn establish_pool(
     Ok(pool)
 }
 
+#[inline]
 pub fn create_game_entry(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     guild: u64,
@@ -39,6 +41,7 @@ pub fn create_game_entry(
         .expect("Error creating new game in database");
 }
 
+#[inline]
 pub fn create_post_entry(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     post: u64,
@@ -71,6 +74,7 @@ pub fn create_post_entry(
     Ok(())
 }
 
+#[inline]
 pub fn create_submission_entry(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
     runner: &str,
@@ -80,6 +84,8 @@ pub fn create_submission_entry(
     forfeit: bool,
 ) -> Result<(), Error> {
     use crate::schema::{games::columns::*, leaderboard::columns::runner_id as runner_ids};
+
+    let current_time: NaiveDateTime = Utc::now().naive_utc();
     let conn = db_pool
         .get()
         .expect("Error getting connection from db pool while inserting submission");
@@ -105,6 +111,7 @@ pub fn create_submission_entry(
         runner_time: time,
         runner_collection: collection,
         runner_forfeit: forfeit,
+        submission_datetime: current_time,
     };
 
     diesel::insert_into(leaderboard::table)
@@ -114,6 +121,7 @@ pub fn create_submission_entry(
     Ok(())
 }
 
+#[inline]
 pub fn get_leaderboard(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
 ) -> Result<Vec<OldSubmission>, Error> {
@@ -131,6 +139,7 @@ pub fn get_leaderboard(
     Ok(all_submissions)
 }
 
+#[inline]
 pub fn get_leaderboard_ids(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
 ) -> Result<Vec<u64>, Error> {
@@ -143,6 +152,7 @@ pub fn get_leaderboard_ids(
     Ok(leaderboard_ids)
 }
 
+#[inline]
 pub fn get_leaderboard_posts(
     leaderboard_channel: &u64,
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
@@ -158,6 +168,7 @@ pub fn get_leaderboard_posts(
     Ok(all_posts)
 }
 
+#[inline]
 pub fn get_submission_posts(
     submission_channel: &u64,
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
@@ -174,6 +185,7 @@ pub fn get_submission_posts(
     Ok(all_posts)
 }
 
+#[inline]
 pub fn get_active_games(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
 ) -> Result<Vec<Game>, Error> {
@@ -184,6 +196,7 @@ pub fn get_active_games(
     Ok(current_games)
 }
 
+#[inline]
 pub fn clear_all_tables(db_pool: &Pool<ConnectionManager<MysqlConnection>>) -> Result<(), Error> {
     let conn = db_pool
         .get()
@@ -196,6 +209,7 @@ pub fn clear_all_tables(db_pool: &Pool<ConnectionManager<MysqlConnection>>) -> R
 }
 
 // temp fix
+#[inline]
 pub fn check_for_active_game(
     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
 ) -> Result<bool, Error> {
@@ -231,6 +245,7 @@ pub struct NewSubmission<'a> {
     pub runner_time: NaiveTime,
     pub runner_collection: u8,
     pub runner_forfeit: bool,
+    pub submission_datetime: NaiveDateTime,
 }
 #[derive(Debug, Queryable, Ord, Eq, PartialEq, PartialOrd)]
 pub struct OldSubmission {
@@ -240,6 +255,7 @@ pub struct OldSubmission {
     pub runner_time: NaiveTime,
     pub runner_collection: u8,
     pub runner_forfeit: bool,
+    pub submission_datetime: NaiveDateTime,
 }
 #[derive(Debug, Insertable, Queryable)]
 #[table_name = "posts"]

@@ -15,6 +15,7 @@ table! {
         runner_time -> Time,
         runner_collection -> Unsigned<Tinyint>,
         runner_forfeit -> Bool,
+        submission_datetime -> Datetime,
     }
 }
 
