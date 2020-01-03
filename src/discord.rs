@@ -457,7 +457,17 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
 
     let ff = vec!["ff", "FF", "forfeit", "Forfeit"];
     if ff.iter().any(|&x| x == maybe_submission[0]) {
-        let mut current_member = msg.member(ctx).unwrap();
+        info!("User forfeited: {}", &msg.author.name);
+        let mut current_member = match msg.member(ctx) {
+            Some(member) => member,
+            None => {
+                warn!(
+                    "Processing submission: Error retrieving Member data from API for {}",
+                    &msg.author.name
+                );
+                return Ok(());
+            }
+        };
         match current_member.add_role(ctx, spoiler_role) {
             Ok(()) => (),
             Err(e) => {
