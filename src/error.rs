@@ -78,7 +78,7 @@ pub struct SubmissionError {
 }
 
 impl SubmissionError {
-    fn new(msg: &str) -> SubmissionError {
+    pub fn new(msg: &str) -> SubmissionError {
         SubmissionError {
             details: msg.to_string(),
         }
@@ -99,6 +99,12 @@ impl fmt::Display for SubmissionError {
 
 impl From<diesel::result::Error> for SubmissionError {
     fn from(err: diesel::result::Error) -> Self {
+        SubmissionError::new(err.description())
+    }
+}
+
+impl From<serenity::Error> for SubmissionError {
+    fn from(err: serenity::Error) -> Self {
         SubmissionError::new(err.description())
     }
 }

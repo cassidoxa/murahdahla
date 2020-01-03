@@ -433,17 +433,24 @@ pub fn get_channels_from_env() -> Result<HashMap<&'static str, ChannelId>, seren
 }
 
 fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), SubmissionError> {
-    let guild = msg.guild_id.unwrap().to_partial_guild(&ctx.http).unwrap();
+    let guild_id = match msg.guild_id {
+        Some(id) => id,
+        None => {
+            let err_msg = format!("Error unwrapping guild id from Message");
+            return Err(SubmissionError::new(&err_msg));
+        }
+    };
+    let guild = guild_id.to_partial_guild(&ctx.http)?;
     let runner_id = msg.author.id;
     let runner_name = msg.author.name.as_str();
     let spoiler_role = match get_spoiler_role(&guild) {
         Ok(role) => role,
         Err(e) => {
-            warn!(
-                "Processing submission: Couldn't get spoiler role from REST API: {}",
+            let err_msg: String = format!(
+                "Submission Error: Couldn't get spoiler role from REST API: {}",
                 e
             );
-            return Ok(());
+            return Err(SubmissionError::new(&err_msg));
         }
     };
 
@@ -461,11 +468,9 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
         let mut current_member = match msg.member(ctx) {
             Some(member) => member,
             None => {
-                warn!(
-                    "Processing submission: Error retrieving Member data from API for {}",
-                    &msg.author.name
-                );
-                return Ok(());
+                let err_string: String =
+                    format!("Error getting PartialMember data from {}", &msg.author.name);
+                return Err(SubmissionError::new(&err_string));
             }
         };
         match current_member.add_role(ctx, spoiler_role) {
