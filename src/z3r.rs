@@ -1,19 +1,16 @@
 use chrono::naive::NaiveDate;
 use fnv::FnvHashMap;
+use reqwest::{blocking::get, Result};
 use serde_json::{from_value, Value};
 
-pub fn get_game_string(
-    game_id: &str,
-    url: &str,
-    todays_date: &NaiveDate,
-) -> reqwest::Result<String> {
+pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Result<String> {
     // TODO: .unwrap() is a bad practice, maybe needs better error handling,
     // but should work in all cases for v31 games
     let url_string: String = format!(
         "https://s3.us-east-2.amazonaws.com/alttpr-patches/{}.json",
         game_id
     );
-    let game_json: Value = reqwest::get(url_string.as_str())?.json()?;
+    let game_json: Value = get(url_string.as_str())?.json()?;
     let state = match game_json["spoiler"]["meta"]["mode"].as_str().unwrap() {
         "open" => "Open",
         "standard" => "Standard",
