@@ -160,7 +160,13 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
         .collect::<Vec<&str>>()
         .last()
         .unwrap();
-    let game_string = z3r::get_game_string(game_hash, args.rest(), &todays_date)?;
+    let game_string = match z3r::get_game_string(game_hash, args.rest(), &todays_date) {
+        Ok(string) => string,
+        Err(e) => {
+            warn!("Error getting game data: {}", e);
+            return Ok(());
+        }
+    };
     let post_id_result = msg.channel_id.say(&ctx.http, &game_string);
 
     let post_id: u64 = match post_id_result {

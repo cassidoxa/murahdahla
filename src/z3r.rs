@@ -1,6 +1,6 @@
 use chrono::naive::NaiveDate;
 use fnv::FnvHashMap;
-use reqwest::{blocking::get, Result};
+use reqwest::{get, Result};
 use serde_json::{from_value, Value};
 
 pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Result<String> {
