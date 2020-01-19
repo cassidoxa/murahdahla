@@ -22,7 +22,7 @@ use dotenv::dotenv;
 use serenity::{framework::standard::StandardFramework, model::id::ChannelId, prelude::*};
 
 use crate::error::BotError;
-use discord::{ActiveGames, ChannelsContainer, DBConnectionContainer, Handler};
+use discord::{ActiveGames, ChannelsContainer, DBConnectionContainer, Handler, GENERAL_GROUP};
 
 fn main() -> Result<(), BotError> {
     dotenv().ok();
@@ -45,7 +45,7 @@ fn main() -> Result<(), BotError> {
     client.with_framework(
         StandardFramework::new()
             .configure(|c| c.prefix("!"))
-            .group(&discord::ADMIN_GROUP),
+            .group(&GENERAL_GROUP),
     );
     if let Err(why) = client.start() {
         error!("Client error: {:?}", why);

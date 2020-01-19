@@ -58,27 +58,27 @@ impl EventHandler for Handler {
         };
 
         if msg.author.id != ctx.cache.read().user.id
-        && game_active
-        && msg.channel_id.as_u64()
-            == match &env::var("SUBMISSION_CHANNEL_ID")
-                .expect("No submissions channel in the environment")
-                .parse::<u64>() {
+            && game_active
+            && msg.channel_id.as_u64()
+                == match &env::var("SUBMISSION_CHANNEL_ID")
+                    .expect("No submissions channel in the environment")
+                    .parse::<u64>()
+                {
                     Ok(channel_u64) => channel_u64,
                     Err(e) => {
                         warn!("Error parsing channel id: {}", e);
                         return;
                     }
-        }
-        // TODO: refactor this
-        && (msg
-            .member
-            .as_ref()
-            .unwrap()
-            .roles
-            .iter()
-            .find(|x| x.as_u64() == admin_role.as_u64()) == None ||
-            [msg.content.as_str().bytes().nth(0).unwrap()] != "!".as_bytes()
-            )
+                }
+            && (msg
+                .member
+                .as_ref()
+                .unwrap()
+                .roles
+                .iter()
+                .find(|x| x.as_u64() == admin_role.as_u64())
+                == None
+                || [msg.content.as_str().bytes().nth(0).unwrap()] != "!".as_bytes())
         {
             info!(
                 "Received message from {}: \"{}\"",
@@ -112,6 +112,10 @@ impl EventHandler for Handler {
     }
 }
 
+#[group]
+#[commands(start, stop)]
+struct General;
+
 #[command]
 fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
     msg.delete(&ctx)?;
@@ -143,7 +147,6 @@ fn start(ctx: &mut Context, msg: &Message, args: Args) -> CommandResult {
 
     refresh(ctx, &guild)?;
 
-    // TODO: could parse/validate this better but this is good for now
     if args
         .rest()
         .split("/")
@@ -527,11 +530,19 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     let mut current_member = match msg.member(ctx) {
         Some(member) => member,
         None => {
-            warn!(
-                "Processing submission: Error retrieving Member data from API for {}",
-                &msg.author.name
+            info!(
+                "Failed retrieving member data from server message. Falling back to http request."
             );
-            return Ok(());
+            match ctx
+                .http
+                .get_member(u64::from(guild_id), u64::from(msg.author.id))
+            {
+                Ok(member) => member,
+                Err(e) => {
+                    warn!("Error getting member data via http request: {}", e);
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -830,12 +841,6 @@ fn fill_leaderboard_refresh(
 
     Ok(())
 }
-
-group!({
-    name: "admin",
-    options: {},
-    commands: [start, stop]
-});
 
 pub struct DBConnectionContainer;
 
