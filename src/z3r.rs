@@ -1,9 +1,15 @@
 use chrono::naive::NaiveDate;
 use fnv::FnvHashMap;
-use reqwest::{get, Result};
+use reqwest::get;
 use serde_json::{from_value, Value};
 
-pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Result<String> {
+use crate::error::BotError;
+
+pub fn get_game_string(
+    game_id: &str,
+    url: &str,
+    todays_date: &NaiveDate,
+) -> Result<String, BotError> {
     // TODO: .unwrap() is a bad practice, maybe needs better error handling,
     // but should work in all cases for v31 games
     let url_string: String = format!(
@@ -11,14 +17,33 @@ pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Res
         game_id
     );
     let game_json: Value = get(url_string.as_str())?.json()?;
-    let state = match game_json["spoiler"]["meta"]["mode"].as_str().unwrap() {
+    match game_json["spoiler"]["meta"]["spoilers"]
+        .as_str()
+        .ok_or(BotError::new("Error parsing spoiler information"))
+    {
+        Ok("mystery") => {
+            let code: Vec<&str> = get_code(&game_json["patch"]);
+            return Ok(format!(
+                "{} - Mystery {}/{}/{}/{}/{} - <{}>",
+                *todays_date, code[0], code[1], code[2], code[3], code[4], url
+            ));
+        }
+        _ => (),
+    }
+    let state = match game_json["spoiler"]["meta"]["mode"]
+        .as_str()
+        .ok_or(BotError::new("Error parsing game state"))?
+    {
         "open" => "Open",
         "standard" => "Standard",
         "inverted" => "Inverted",
         "retro" => "Retro",
         _ => "Unknown State",
     };
-    let goal = match game_json["spoiler"]["meta"]["goal"].as_str().unwrap() {
+    let goal = match game_json["spoiler"]["meta"]["goal"]
+        .as_str()
+        .ok_or(BotError::new("Error parsing goal"))?
+    {
         "ganon" => "Defeat Ganon",
         "fast_ganon" => "Fast Ganon",
         "dungeons" => "All Dungeons",
@@ -28,15 +53,15 @@ pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Res
     };
     let gt_crystals = game_json["spoiler"]["meta"]["entry_crystals_tower"]
         .as_str()
-        .unwrap();
+        .ok_or(BotError::new("Error parsing GT crystals"))?;
     let ganon_crystals = game_json["spoiler"]["meta"]["entry_crystals_ganon"]
         .as_str()
-        .unwrap();
+        .ok_or(BotError::new("Error parsing Ganon crystals"))?;
     let code: Vec<&str> = get_code(&game_json["patch"]);
 
     let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
         .as_str()
-        .unwrap()
+        .ok_or(BotError::new("Error parsing dungeon item shuffle"))?
     {
         "standard" => "Standard ",
         "mc" => "MC ",
@@ -46,7 +71,10 @@ pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Res
     };
     let mut shuffle = "Vanilla Shuffle ";
     if game_json["spoiler"]["meta"].get("shuffle") != None {
-        shuffle = match game_json["spoiler"]["meta"]["shuffle"].as_str().unwrap() {
+        shuffle = match game_json["spoiler"]["meta"]["shuffle"]
+            .as_str()
+            .ok_or(BotError::new("Error parsing entrance shuffle"))?
+        {
             "simple" => "Simple Shuffle ",
             "restricted" => "Restricted Shuffle ",
             "full" => "Full Shuffle ",
@@ -55,7 +83,10 @@ pub fn get_game_string(game_id: &str, url: &str, todays_date: &NaiveDate) -> Res
             _ => "Unknown Shuffle ",
         };
     }
-    let logic = match game_json["spoiler"]["meta"]["logic"].as_str().unwrap() {
+    let logic = match game_json["spoiler"]["meta"]["logic"]
+        .as_str()
+        .ok_or(BotError::new("Error parsing logic"))?
+    {
         "NoGlitches" => "No Glitches ",
         "OverworldGlitches" => "Overworld Glitches ",
         "Major Glitches" => "Major Glitches ",

@@ -6,7 +6,7 @@ pub struct BotError {
 }
 
 impl BotError {
-    fn new(msg: &str) -> BotError {
+    pub fn new(msg: &str) -> BotError {
         BotError {
             details: msg.to_string(),
         }
@@ -33,6 +33,12 @@ impl From<serenity::Error> for BotError {
 
 impl From<diesel::result::Error> for BotError {
     fn from(err: diesel::result::Error) -> Self {
+        BotError::new(err.description())
+    }
+}
+
+impl From<reqwest::Error> for BotError {
+    fn from(err: reqwest::Error) -> Self {
         BotError::new(err.description())
     }
 }
