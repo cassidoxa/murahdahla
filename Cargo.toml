@@ -1,6 +1,6 @@
 [package]
 name = "murahdahla"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["cassidoxa <cassidymoen@gmx.com>"]
 edition = "2018"
 
