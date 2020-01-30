@@ -1,5 +1,6 @@
+use std::collections::HashMap;
+
 use chrono::naive::NaiveDate;
-use fnv::FnvHashMap;
 use reqwest::get;
 use serde_json::{from_value, Value};
 
@@ -24,7 +25,7 @@ pub fn get_game_string(
         Ok("mystery") => {
             let code: Vec<&str> = get_code(&game_json["patch"]);
             return Ok(format!(
-                "{} - Mystery {}/{}/{}/{}/{} - <{}>",
+                "{} - Mystery ({}/{}/{}/{}/{}) - <{}>",
                 *todays_date, code[0], code[1], code[2], code[3], code[4], url
             ));
         }
@@ -134,8 +135,8 @@ fn get_code(patch: &Value) -> Vec<&str> {
 }
 
 lazy_static! {
-    static ref CODEMAP: FnvHashMap<u8, &'static str> = {
-        let mut map = FnvHashMap::with_capacity_and_hasher(32, Default::default());
+    static ref CODEMAP: HashMap<u8, &'static str> = {
+        let mut map = HashMap::with_capacity(32);
         map.insert(0, "Bow");
         map.insert(1, "Boomerang");
         map.insert(2, "Hookshot");

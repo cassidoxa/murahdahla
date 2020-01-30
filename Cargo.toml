@@ -8,10 +8,8 @@ edition = "2018"
 chrono = "0.4.10"
 dotenv = "0.15.0"
 env_logger = "0.7.1"
-fnv = "1.0.6"
 lazy_static = "1.4.0"
 log = "0.4.8"
-reqwest = "0.9.24"
 serde_json = "1.0.44"
 
 [dependencies.diesel]
@@ -19,9 +17,14 @@ version = "1.4.3"
 default-features = false
 features = ["mysql", "chrono", "r2d2"]
 
+[dependencies.reqwest]
+version = "0.9.24"
+default-features = false
+features = ["rustls-tls"]
+
 [dependencies.serenity]
 version = "0.8.0"
-features = ["cache", "framework", "standard_framework", "rustls_backend"]
+features = ["cache", "standard_framework", "rustls_backend"]
 
 [profile.release]
 opt-level = 3

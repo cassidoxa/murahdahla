@@ -2,7 +2,6 @@ extern crate chrono;
 #[macro_use]
 extern crate diesel;
 extern crate dotenv;
-extern crate fnv;
 #[macro_use]
 extern crate log;
 #[macro_use]
