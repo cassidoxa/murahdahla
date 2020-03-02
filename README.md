@@ -10,7 +10,11 @@ they can be installed via [rustup](https://rustup.rs) (the preferred method.)
 
 ## 1. Clone this repo
 
-## 2. Diesel Setup
+## 2. Setting up environment variables
+
+Copy and rename `.env.example` to `.env`. 
+
+## 3. Diesel Setup
 
 Murahdahla requires a MySQL database and uses the [Diesel ORM](https://github.com/diesel-rs/diesel)
 to manage the database. First install `diesel-cli` by running
@@ -21,11 +25,7 @@ Put the database URL in your `.env` file. Then run `diesel migration setup`. If 
 to be migrated following an update, you must run `diesel migration run` after pulling the update.
 Refer to the MySQL documentation for instructions on setting up a database.
 
-## 4. Setting up environment variables
-
-Copy and rename `.env.example` to `.env`. 
-
-## 3. Compile
+## 4. Compile
 
 You can compile this program by running `cargo build --release` from the main directory. This
 pulls in all the dependencies from crates.io and requires an internet connection. After compiling the binary
