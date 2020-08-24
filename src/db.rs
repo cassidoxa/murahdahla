@@ -80,7 +80,7 @@ pub fn create_submission_entry(
     runner: &str,
     id: u64,
     time: NaiveTime,
-    collection: u8,
+    collection: u16,
     forfeit: bool,
 ) -> Result<(), Error> {
     use crate::schema::{games::columns::*, leaderboard::columns::runner_id as runner_ids};
@@ -243,7 +243,7 @@ pub struct NewSubmission<'a> {
     pub game_id: u32,
     pub runner_name: &'a str,
     pub runner_time: NaiveTime,
-    pub runner_collection: u8,
+    pub runner_collection: u16,
     pub runner_forfeit: bool,
     pub submission_datetime: NaiveDateTime,
 }
@@ -253,7 +253,7 @@ pub struct OldSubmission {
     pub game_id: u32,
     pub runner_name: String,
     pub runner_time: NaiveTime,
-    pub runner_collection: u8,
+    pub runner_collection: u16,
     pub runner_forfeit: bool,
     pub submission_datetime: NaiveDateTime,
 }

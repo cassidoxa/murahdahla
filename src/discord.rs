@@ -516,7 +516,7 @@ fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), Submissio
     };
 
     let maybe_collect: &str = maybe_submission.remove(0);
-    let submission_collect = match maybe_collect.parse::<u8>() {
+    let submission_collect = match maybe_collect.parse::<u16>() {
         Ok(submission_collect) => submission_collect,
         Err(_e) => {
             info!(

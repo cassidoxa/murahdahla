@@ -13,7 +13,7 @@ table! {
         game_id -> Unsigned<Integer>,
         runner_name -> Varchar,
         runner_time -> Time,
-        runner_collection -> Unsigned<Smallint>,
+        runner_collection -> Nullable<Unsigned<Smallint>>,
         runner_forfeit -> Bool,
         submission_datetime -> Datetime,
     }
