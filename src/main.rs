@@ -1,54 +1,101 @@
-extern crate chrono;
+#![allow(dead_code, unused_mut, unused_variables, unused_imports)]
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+};
+
+use anyhow::Result;
 #[macro_use]
 extern crate diesel;
-extern crate dotenv;
+use diesel::{
+    mysql::MysqlConnection,
+    r2d2::{ConnectionManager, Pool, PooledConnection},
+};
+use dotenv::dotenv;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate lazy_static;
-extern crate reqwest;
-extern crate serde_json;
+use reqwest;
+use serenity::{
+    framework::standard::StandardFramework,
+    http::Http,
+    model::id::{ChannelId, GuildId},
+    prelude::*,
+};
+use tokio::prelude::*;
 
-mod db;
-mod discord;
-mod error;
-mod schema;
-mod z3r;
+pub mod discord;
+pub mod games;
+pub mod helpers;
+pub mod schema;
 
-use std::{collections::HashMap, env};
+use crate::{
+    discord::{
+        channel_groups::{get_groups, get_submission_channels, ChannelGroup},
+        commands::{after_hook, before_hook, GENERAL_GROUP},
+        messages::Handler,
+        servers::get_servers,
+    },
+    helpers::*,
+};
 
-use dotenv::dotenv;
-use serenity::{framework::standard::StandardFramework, model::id::ChannelId, prelude::*};
-
-use crate::error::BotError;
-use discord::{ActiveGames, ChannelsContainer, DBConnectionContainer, Handler, GENERAL_GROUP};
-
-fn main() -> Result<(), BotError> {
-    dotenv().ok();
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenv().expect("Failed to load .env file");
     env_logger::init();
 
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment.");
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let mut client = Client::new(&token, Handler).expect("Error creating client");
+    let token = env::var("MURAHDAHLA_DISCORD_TOKEN")
+        .expect("Expected MURAHDAHLA_DISCORD_TOKEN in the environment.");
+    let database_url = env::var("MURAHDAHLA_DATABASE_URL")
+        .expect("Expected MURAHDAHLA_DATABASE_URL in the environment");
+    let http = Http::new_with_token(&token);
+    let (owners, _bot_id) = match http.get_current_application_info().await {
+        Ok(info) => {
+            let mut owners = HashSet::new();
+            owners.insert(info.owner.id);
 
+            (owners, info.id)
+        }
+        Err(e) => panic!("Could not access application info: {:?}", e),
+    };
+    let framework = StandardFramework::new()
+        .configure(|c| c.prefix("!").allow_dm(false).owners(owners))
+        .group(&GENERAL_GROUP)
+        .before(before_hook)
+        .after(after_hook);
+
+    let mut client = Client::builder(&token)
+        .framework(framework)
+        .event_handler(Handler)
+        .await
+        .expect("Error creating client");
+
+    // get db pool, current servers, channels, permissions
+    // we need:
+    // hashset of current submission channels
+    // permissions struct
+    // groups struct
     {
-        let mut data = client.data.write();
-        let db_pool = db::establish_pool(&database_url)?;
-        let active_game: bool = db::check_for_active_game(&db_pool)?;
-        let channels: HashMap<&'static str, ChannelId> = discord::get_channels_from_env()?;
-        data.insert::<DBConnectionContainer>(db_pool);
-        data.insert::<ActiveGames>(active_game);
-        data.insert::<ChannelsContainer>(channels);
+        let mut data = client.data.write().await;
+        let db_pool = get_pool(&database_url)?;
+        let conn = db_pool
+            .get()
+            .expect("Error retrieving database connection from pool");
+
+        let submission_channel_set = get_submission_channels(&conn)?;
+        let servers = get_servers(&conn)?;
+        let groups = get_groups(&conn)?;
+
+        data.insert::<DBPool>(db_pool);
+        data.insert::<SubmissionSet>(submission_channel_set);
+        data.insert::<ServerContainer>(servers);
+        data.insert::<GroupContainer>(groups);
     }
 
-    client.with_framework(
-        StandardFramework::new()
-            .configure(|c| c.prefix("!"))
-            .group(&GENERAL_GROUP),
-    );
-    if let Err(why) = client.start() {
-        error!("Client error: {:?}", why);
+    if let Err(e) = client.start().await {
+        error!("Client error: {:?}", e);
     }
 
     Ok(())
+
+    // todo!();
 }

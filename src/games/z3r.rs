@@ -1,26 +1,36 @@
-use std::collections::HashMap;
-
+use anyhow::{anyhow, Error, Result};
 use chrono::naive::NaiveDate;
 use reqwest::get;
 use serde_json::{from_value, Value};
+use url::Url;
 
-use crate::error::BotError;
+use crate::helpers::BoxedError;
 
-pub fn get_game_string(
-    game_id: &str,
-    url: &str,
-    todays_date: &NaiveDate,
-) -> Result<String, BotError> {
-    // TODO: .unwrap() is a bad practice, maybe needs better error handling,
-    // but should work in all cases for v31 games
-    let url_string: String = format!(
-        "https://s3.us-east-2.amazonaws.com/alttpr-patches/{}.json",
-        game_id
-    );
-    let game_json: Value = get(url_string.as_str())?.json()?;
+pub struct Z3rGame {
+    patch: Value,
+    url: Url,
+}
+
+impl Z3rGame {
+    pub async fn new_from_url(url: Url) -> Result<Self, BoxedError> {
+        todo!();
+    }
+
+    pub async fn get_patch(game_id: &str) -> Result<Value> {
+        let url_string: String = format!(
+            "https://s3.us-east-2.amazonaws.com/alttpr-patches/{}.json",
+            game_id
+        );
+        let patch_json: Value = get(url_string.as_str()).await?.json().await?;
+
+        Ok(patch_json)
+    }
+}
+
+pub fn get_game_string(game_json: Value, url: &str, todays_date: &NaiveDate) -> Result<String> {
     match game_json["spoiler"]["meta"]["spoilers"]
         .as_str()
-        .ok_or(BotError::new("Error parsing spoiler information"))
+        .ok_or::<Error>(anyhow!("Error parsing spoiler meta information"))
     {
         Ok("mystery") => {
             let code: Vec<&str> = get_code(&game_json["patch"]);
@@ -33,7 +43,7 @@ pub fn get_game_string(
     }
     let state = match game_json["spoiler"]["meta"]["mode"]
         .as_str()
-        .ok_or(BotError::new("Error parsing game state"))?
+        .ok_or::<Error>(anyhow!("Error parsing game state"))?
     {
         "open" => "Open",
         "standard" => "Standard",
@@ -43,7 +53,7 @@ pub fn get_game_string(
     };
     let goal = match game_json["spoiler"]["meta"]["goal"]
         .as_str()
-        .ok_or(BotError::new("Error parsing goal"))?
+        .ok_or::<Error>(anyhow!("Error parsing goal").into())?
     {
         "ganon" => "Defeat Ganon",
         "fast_ganon" => "Fast Ganon",
@@ -54,15 +64,15 @@ pub fn get_game_string(
     };
     let gt_crystals = game_json["spoiler"]["meta"]["entry_crystals_tower"]
         .as_str()
-        .ok_or(BotError::new("Error parsing GT crystals"))?;
+        .ok_or::<Error>(anyhow!("Error parsing GT crystals"))?;
     let ganon_crystals = game_json["spoiler"]["meta"]["entry_crystals_ganon"]
         .as_str()
-        .ok_or(BotError::new("Error parsing Ganon crystals"))?;
+        .ok_or::<Error>(anyhow!("Error parsing Ganon crystals"))?;
     let code: Vec<&str> = get_code(&game_json["patch"]);
 
     let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
         .as_str()
-        .ok_or(BotError::new("Error parsing dungeon item shuffle"))?
+        .ok_or::<Error>(anyhow!("Error parsing dungeon item shuffle"))?
     {
         "standard" => "Standard ",
         "mc" => "MC ",
@@ -74,7 +84,7 @@ pub fn get_game_string(
     if game_json["spoiler"]["meta"].get("shuffle") != None {
         shuffle = match game_json["spoiler"]["meta"]["shuffle"]
             .as_str()
-            .ok_or(BotError::new("Error parsing entrance shuffle"))?
+            .ok_or::<Error>(anyhow!("Error parsing entrance shuffle"))?
         {
             "simple" => "Simple Shuffle ",
             "restricted" => "Restricted Shuffle ",
@@ -86,7 +96,7 @@ pub fn get_game_string(
     }
     let logic = match game_json["spoiler"]["meta"]["logic"]
         .as_str()
-        .ok_or(BotError::new("Error parsing logic"))?
+        .ok_or::<Error>(anyhow!("Error parsing logic"))?
     {
         "NoGlitches" => "No Glitches ",
         "OverworldGlitches" => "Overworld Glitches ",
@@ -119,57 +129,60 @@ pub fn get_game_string(
     Ok(game_string)
 }
 
-fn get_code(patch: &Value) -> Vec<&str> {
-    let mut code: Vec<&str> = Vec::with_capacity(5);
+#[inline]
+fn get_code(patch: &Value) -> Vec<&'static str> {
+    // we have to search for the code values here, they will not always
+    // be located at the same position in the json
+    // TODO: maybe a more performant way to find this
+    let mut code: Vec<&'static str> = Vec::with_capacity(5);
     for i in patch.as_array().unwrap().iter() {
         if i.as_object().unwrap().contains_key("1573397") {
             code = from_value::<Vec<u8>>(i.get("1573397").unwrap().clone())
                 .unwrap()
                 .into_iter()
-                .map(|x| CODEMAP[&x])
+                .map(|x| code_map(x))
                 .collect();
+            break;
         }
     }
 
     code
 }
 
-lazy_static! {
-    static ref CODEMAP: HashMap<u8, &'static str> = {
-        let mut map = HashMap::with_capacity(32);
-        map.insert(0, "Bow");
-        map.insert(1, "Boomerang");
-        map.insert(2, "Hookshot");
-        map.insert(3, "Bombs");
-        map.insert(4, "Mushroom");
-        map.insert(5, "Powder");
-        map.insert(6, "Ice Rod");
-        map.insert(7, "Pendant");
-        map.insert(8, "Bombos");
-        map.insert(9, "Ether");
-        map.insert(10, "Quake");
-        map.insert(11, "Lamp");
-        map.insert(12, "Hammer");
-        map.insert(13, "Shovel");
-        map.insert(14, "Flute");
-        map.insert(15, "Net");
-        map.insert(16, "Book");
-        map.insert(17, "Empty Bottle");
-        map.insert(18, "Green Potion");
-        map.insert(19, "Somaria");
-        map.insert(20, "Cape");
-        map.insert(21, "Mirror");
-        map.insert(22, "Boots");
-        map.insert(23, "Gloves");
-        map.insert(24, "Flippers");
-        map.insert(25, "Pearl");
-        map.insert(26, "Shield");
-        map.insert(27, "Tunic");
-        map.insert(28, "Heart");
-        map.insert(29, "Map");
-        map.insert(30, "Compass");
-        map.insert(31, "Key");
-
-        map
-    };
+const fn code_map(value: u8) -> &'static str {
+    match value {
+        0 => "Bow",
+        1 => "Boomerang",
+        2 => "Hookshot",
+        3 => "Bombs",
+        4 => "Mushroom",
+        5 => "Powder",
+        6 => "Ice Rod",
+        7 => "Pendant",
+        8 => "Bombos",
+        9 => "Ether",
+        10 => "Quake",
+        11 => "Lamp",
+        12 => "Hammer",
+        13 => "Shovel",
+        14 => "Flute",
+        15 => "Net",
+        16 => "Book",
+        17 => "Empty Bottle",
+        18 => "Green Potion",
+        19 => "Somaria",
+        20 => "Cape",
+        21 => "Mirror",
+        22 => "Boots",
+        23 => "Gloves",
+        24 => "Flippers",
+        25 => "Pearl",
+        26 => "Shield",
+        27 => "Tunic",
+        28 => "Heart",
+        29 => "Map",
+        30 => "Compass",
+        31 => "Key",
+        _ => "Unknown",
+    }
 }

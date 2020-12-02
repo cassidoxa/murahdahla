@@ -1,1 +1,0 @@
-ALTER TABLE leaderboard MODIFY COLUMN runner_collection SMALLINT(3) UNSIGNED NOT NULL;

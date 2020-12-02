@@ -7,11 +7,19 @@ pub use diesel::{
     r2d2::{ConnectionManager, Pool},
     result::Error,
 };
+use serenity::prelude::TypeMapKey;
+
+type MysqlPool = Pool<ConnectionManager<MysqlConnection>>;
+type PooledConn = PoolConnection<MysqlConnectionManager>;
+
+pub struct DBConnectionContainer;
+
+impl TypeMapKey for DBConnectionContainer {
+    type Value = MysqlPool;
+}
 
 #[inline]
-pub fn establish_pool(
-    database_url: &str,
-) -> Result<Pool<ConnectionManager<MysqlConnection>>, Error> {
+pub fn get_pool(database_url: &str) -> Result<MysqlPool, Error> {
     let manager = ConnectionManager::<MysqlConnection>::new(database_url);
     let pool = Pool::builder()
         .build(manager)
@@ -21,11 +29,7 @@ pub fn establish_pool(
 }
 
 #[inline]
-pub fn create_game_entry(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-    guild: u64,
-    todays_date: &NaiveDate,
-) {
+pub fn create_game_entry(db_pool: &MysqlPool, guild: u64, todays_date: &NaiveDate) {
     let conn = db_pool
         .get()
         .expect("Error getting connection from db pool while inserting new game");
@@ -43,7 +47,7 @@ pub fn create_game_entry(
 
 #[inline]
 pub fn create_post_entry(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    db_pool: &MysqlPool,
     post: u64,
     time: NaiveDateTime,
     guild: u64,
@@ -76,7 +80,7 @@ pub fn create_post_entry(
 
 #[inline]
 pub fn create_submission_entry(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    db_pool: &MysqlPool,
     runner: &str,
     id: u64,
     time: NaiveTime,
@@ -122,9 +126,7 @@ pub fn create_submission_entry(
 }
 
 #[inline]
-pub fn get_leaderboard(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-) -> Result<Vec<OldSubmission>, Error> {
+pub fn get_leaderboard(db_pool: &MysqlPool) -> Result<Vec<OldSubmission>, Error> {
     let conn = db_pool
         .get()
         .expect("Error getting connection from db pool while getting leaderboard");
@@ -140,9 +142,7 @@ pub fn get_leaderboard(
 }
 
 #[inline]
-pub fn get_leaderboard_ids(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-) -> Result<Vec<u64>, Error> {
+pub fn get_leaderboard_ids(db_pool: &MysqlPool) -> Result<Vec<u64>, Error> {
     use crate::schema::leaderboard::columns::runner_id;
     let conn = db_pool
         .get()
@@ -155,7 +155,7 @@ pub fn get_leaderboard_ids(
 #[inline]
 pub fn get_leaderboard_posts(
     leaderboard_channel: &u64,
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    db_pool: &MysqlPool,
 ) -> Result<Vec<Post>, Error> {
     use crate::schema::posts::columns::guild_channel;
     let conn = db_pool
@@ -171,7 +171,7 @@ pub fn get_leaderboard_posts(
 #[inline]
 pub fn get_submission_posts(
     submission_channel: &u64,
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
+    db_pool: &MysqlPool,
 ) -> Result<Vec<Post>, Error> {
     use crate::schema::posts::columns::guild_channel;
     let conn = db_pool
@@ -183,86 +183,4 @@ pub fn get_submission_posts(
         .unwrap();
     all_posts.sort_by(|a, b| b.post_datetime.cmp(&a.post_datetime).reverse());
     Ok(all_posts)
-}
-
-#[inline]
-pub fn get_active_games(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-) -> Result<Vec<Game>, Error> {
-    let conn = db_pool
-        .get()
-        .expect("Error getting db connection from pool while getting active games");
-    let current_games: Vec<Game> = games::table.load::<Game>(&conn)?;
-    Ok(current_games)
-}
-
-#[inline]
-pub fn clear_all_tables(db_pool: &Pool<ConnectionManager<MysqlConnection>>) -> Result<(), Error> {
-    let conn = db_pool
-        .get()
-        .expect("Error getting db connection from pool while clearing tables");
-    diesel::delete(posts::table).execute(&conn)?;
-    diesel::delete(leaderboard::table).execute(&conn)?;
-    diesel::delete(games::table).execute(&conn)?;
-
-    Ok(())
-}
-
-// temp fix
-#[inline]
-pub fn check_for_active_game(
-    db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-) -> Result<bool, Error> {
-    use crate::schema::games::columns::game_active;
-    let conn = db_pool
-        .get()
-        .expect("Error getting db connection from pool while checking for active game");
-    let active_game: bool =
-        diesel::dsl::select(exists(games::table.filter(game_active.eq(true)))).get_result(&conn)?;
-    Ok(active_game)
-}
-
-#[derive(Debug, Insertable)]
-#[table_name = "games"]
-pub struct NewGame {
-    pub game_date: NaiveDate,
-    pub guild_id: u64,
-    pub game_active: bool,
-}
-#[derive(Debug, Queryable)]
-pub struct Game {
-    pub game_id: u32,
-    pub game_date: NaiveDate,
-    pub guild_id: u64,
-    pub game_active: bool,
-}
-#[derive(Debug, Insertable)]
-#[table_name = "leaderboard"]
-pub struct NewSubmission<'a> {
-    pub runner_id: u64,
-    pub game_id: u32,
-    pub runner_name: &'a str,
-    pub runner_time: NaiveTime,
-    pub runner_collection: u16,
-    pub runner_forfeit: bool,
-    pub submission_datetime: NaiveDateTime,
-}
-#[derive(Debug, Queryable, Ord, Eq, PartialEq, PartialOrd)]
-pub struct OldSubmission {
-    pub runner_id: u64,
-    pub game_id: u32,
-    pub runner_name: String,
-    pub runner_time: NaiveTime,
-    pub runner_collection: u16,
-    pub runner_forfeit: bool,
-    pub submission_datetime: NaiveDateTime,
-}
-#[derive(Debug, Insertable, Queryable)]
-#[table_name = "posts"]
-pub struct Post {
-    pub post_id: u64,
-    pub post_datetime: NaiveDateTime,
-    pub game_id: u32,
-    pub guild_id: u64,
-    pub guild_channel: u64,
 }

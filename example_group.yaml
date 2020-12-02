@@ -1,0 +1,21 @@
+# Use this file to define a new channel group for murahdahla
+# Server owner or user with admin permissions (set via !setadminrole
+# command)can attach this to a message with the !addgroup command.
+# All values here should be enclosed in quotes.
+
+# You can name your group anything you want under 255 characters.
+# Put this value in quotation marks
+group_name: "default_group"
+
+# Channel where submissions are recieved. All messages in this channel will
+# be automatically delete by the bot
+submission: "example-submission-channel"
+
+# Channel where the leaderboard is displayed
+leaderboard: "example-leaderboard-channel"
+
+# Channel for discussing spoilers
+spoilers: "example-spoiler-chanel"
+
+# Role used to gate access to the spoilers channel. Case sensitive
+spoiler_role: "example-role"

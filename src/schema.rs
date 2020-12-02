@@ -1,36 +1,71 @@
 table! {
-    games (game_id) {
-        game_id -> Unsigned<Integer>,
-        game_date -> Date,
-        guild_id -> Unsigned<Bigint>,
-        game_active -> Bool,
+    async_races (race_id) {
+        race_id -> Unsigned<Integer>,
+        channel_group_id -> Binary,
+        race_active -> Bool,
+        race_date -> Date,
+        race_game -> Tinytext,
+        race_type -> Tinytext,
     }
 }
 
 table! {
-    leaderboard (runner_id) {
+    channels (channel_group_id) {
+        channel_group_id -> Binary,
+        server_id -> Unsigned<Bigint>,
+        group_name -> Tinytext,
+        submission -> Unsigned<Bigint>,
+        leaderboard -> Unsigned<Bigint>,
+        spoiler -> Unsigned<Bigint>,
+        spoiler_role -> Tinytext,
+    }
+}
+
+table! {
+    messages (message_id) {
+        message_id -> Unsigned<Bigint>,
+        message_datetime -> Datetime,
+        race_id -> Unsigned<Integer>,
+        server_id -> Unsigned<Bigint>,
+        race_active -> Bool,
+        channel_id -> Unsigned<Bigint>,
+        message_type -> Tinytext,
+    }
+}
+
+table! {
+    servers (server_id) {
+        server_id -> Unsigned<Bigint>,
+        owner_id -> Unsigned<Bigint>,
+        admin_role_id -> Nullable<Unsigned<Bigint>>,
+        mod_role_id -> Nullable<Unsigned<Bigint>>,
+    }
+}
+
+table! {
+    submissions (submission_id) {
+        submission_id -> Unsigned<Integer>,
         runner_id -> Unsigned<Bigint>,
-        game_id -> Unsigned<Integer>,
+        race_id -> Unsigned<Integer>,
+        submission_datetime -> Datetime,
         runner_name -> Varchar,
         runner_time -> Time,
-        runner_collection -> Unsigned<Smallint>,
+        runner_collection -> Nullable<Unsigned<Smallint>>,
+        option_number -> Nullable<Unsigned<Integer>>,
+        option_text -> Nullable<Tinytext>,
         runner_forfeit -> Bool,
-        submission_datetime -> Datetime,
     }
 }
 
-table! {
-    posts (post_id) {
-        post_id -> Unsigned<Bigint>,
-        post_datetime -> Datetime,
-        game_id -> Unsigned<Integer>,
-        guild_id -> Unsigned<Bigint>,
-        guild_channel -> Unsigned<Bigint>,
-    }
-}
+joinable!(async_races -> channels (channel_group_id));
+joinable!(channels -> servers (server_id));
+joinable!(messages -> async_races (race_id));
+joinable!(submissions -> async_races (race_id));
 
 allow_tables_to_appear_in_same_query!(
-    games,
-    leaderboard,
-    posts,
+    async_races,
+    channels,
+    messages,
+    servers,
+    submissions,
 );

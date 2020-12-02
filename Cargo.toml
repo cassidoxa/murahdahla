@@ -1,16 +1,21 @@
 [package]
 name = "murahdahla"
-version = "0.2.7"
+version = "0.3.0"
 authors = ["cassidoxa <cassidymoen@gmx.com>"]
 edition = "2018"
 
 [dependencies]
-chrono = "0.4.15"
+anyhow = "1.0.34"
+chrono = "0.4.19"
 dotenv = "0.15.0"
-env_logger = "0.7.1"
-lazy_static = "1.4.0"
+env_logger = "0.8.1"
+futures = "0.3.8"
 log = "0.4.11"
-serde_json = "1.0.57"
+serde = "1.0"
+serde_json = "1.0"
+serde_yaml = "0.8"
+url = "2.2.0"
+uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [dependencies.diesel]
 version = "1.4.5"
@@ -18,19 +23,25 @@ default-features = false
 features = ["mysql", "chrono", "r2d2"]
 
 [dependencies.reqwest]
-version = "0.9.24"
+version = "0.10.8"
 default-features = false
 features = ["rustls-tls"]
 
 [dependencies.serenity]
-version = "0.8.0"
+version = "0.9.2"
 features = ["cache", "standard_framework", "rustls_backend"]
+
+[dependencies.tokio]
+version = "0.2"
+default-features = false
+features = ["macros", "rt-core", "rt-threaded", "signal"]
 
 [profile.release]
 opt-level = 3
 debug = false
 rpath = false
 lto = true
+overflow-checks = false
 debug-assertions = false
 codegen-units = 1
 panic = "abort"
