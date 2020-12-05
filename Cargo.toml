@@ -23,9 +23,9 @@ default-features = false
 features = ["mysql", "chrono", "r2d2"]
 
 [dependencies.reqwest]
-version = "0.10.8"
+version = "0.10.9"
 default-features = false
-features = ["rustls-tls"]
+features = ["rustls-tls", "json", "gzip"]
 
 [dependencies.serenity]
 version = "0.9.2"
@@ -34,7 +34,7 @@ features = ["cache", "standard_framework", "rustls_backend"]
 [dependencies.tokio]
 version = "0.2"
 default-features = false
-features = ["macros", "rt-core", "rt-threaded", "signal"]
+features = ["macros", "rt-threaded", "signal"]
 
 [profile.release]
 opt-level = 3

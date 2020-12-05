@@ -1,11 +1,22 @@
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
+    fmt,
     iter::FromIterator,
 };
 
 use anyhow::{anyhow, Result};
-use diesel::prelude::*;
+use diesel::{
+    backend::Backend,
+    deserialize,
+    deserialize::{FromSql, FromSqlRow},
+    expression::AsExpression,
+    helper_types::AsExprOf,
+    mysql::Mysql,
+    prelude::*,
+    row::Row,
+    sql_types::Text,
+};
 use serde::{Deserialize, Deserializer};
 use serenity::{
     model::{
@@ -103,6 +114,54 @@ impl ChannelGroup {
     }
 }
 
+#[derive(Debug, Clone, Copy, FromSqlRow)]
+pub enum ChannelType {
+    Submission,
+    Leaderboard,
+    Spoiler,
+}
+
+impl<DB> FromSql<Text, DB> for ChannelType
+where
+    DB: Backend,
+    String: FromSql<Text, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        match String::from_sql(bytes)?.as_str() {
+            "submission" => Ok(ChannelType::Submission),
+            "leaderboard" => Ok(ChannelType::Leaderboard),
+            "spoiler" => Ok(ChannelType::Spoiler),
+            x => Err(format!("Unrecognized channel type: {}", x).into()),
+        }
+    }
+}
+
+impl AsExpression<Text> for ChannelType {
+    type Expression = AsExprOf<String, Text>;
+
+    fn as_expression(self) -> Self::Expression {
+        <String as AsExpression<Text>>::as_expression(self.to_string())
+    }
+}
+
+impl<'a> AsExpression<Text> for &'a ChannelType {
+    type Expression = AsExprOf<String, Text>;
+
+    fn as_expression(self) -> Self::Expression {
+        <String as AsExpression<Text>>::as_expression(self.to_string())
+    }
+}
+
+impl fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ChannelType::Submission => write!(f, "submission"),
+            ChannelType::Leaderboard => write!(f, "leaderboard"),
+            ChannelType::Spoiler => write!(f, "spoiler"),
+        }
+    }
+}
+
 async fn validate_new_group(
     ctx: &Context,
     msg: &Message,
@@ -178,6 +237,7 @@ async fn validate_new_group(
     }
 }
 
+#[inline]
 pub fn get_groups(conn: &PooledConn) -> Result<HashMap<u64, ChannelGroup>> {
     use crate::schema::channels::columns::*;
     use crate::schema::channels::dsl::*;
@@ -192,6 +252,18 @@ pub fn get_groups(conn: &PooledConn) -> Result<HashMap<u64, ChannelGroup>> {
     Ok(group_map)
 }
 
+pub async fn get_group(ctx: &Context, msg: &Message) -> ChannelGroup {
+    let data = ctx.data.read().await;
+    let group = data
+        .get::<GroupContainer>()
+        .expect("No group container in share map")
+        .get(msg.channel_id.as_u64())
+        .unwrap();
+
+    group.clone()
+}
+
+#[inline]
 pub fn get_submission_channels(conn: &PooledConn) -> Result<HashSet<u64>> {
     use crate::schema::channels::columns::*;
 
@@ -199,4 +271,12 @@ pub fn get_submission_channels(conn: &PooledConn) -> Result<HashSet<u64>> {
     let submission_channels: HashSet<u64> = HashSet::from_iter(sub_column.drain(..));
 
     Ok(submission_channels)
+}
+
+pub async fn in_submission_channel(ctx: &Context, msg: &Message) -> bool {
+    let data = ctx.data.read().await;
+    let channels = data
+        .get::<SubmissionSet>()
+        .expect("Error getting submission channels");
+    channels.contains(msg.channel_id.as_u64())
 }

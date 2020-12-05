@@ -158,11 +158,3 @@ pub async fn add_server(ctx: &Context, msg: &Message) -> Result<()> {
 
     Ok(())
 }
-
-pub async fn in_submission_channel(ctx: &Context, msg: &Message) -> bool {
-    let data = ctx.data.read().await;
-    let channels = data
-        .get::<SubmissionSet>()
-        .expect("Error getting submission channels");
-    channels.contains(msg.channel_id.as_u64())
-}

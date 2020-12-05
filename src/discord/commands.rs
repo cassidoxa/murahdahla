@@ -1,8 +1,9 @@
-use std::{collections::HashSet, convert::TryFrom};
+use std::{collections::HashSet, convert::TryFrom, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use chrono::{offset::Utc, NaiveDateTime, NaiveTime};
 use diesel::{insert_into, prelude::*};
+use futures::{join, try_join};
 use serenity::{
     framework::standard::{
         macros::{command, group, hook},
@@ -21,14 +22,14 @@ use uuid::Uuid;
 
 use crate::{
     discord::{
-        channel_groups::ChannelGroup,
-        messages::build_listgroups_message,
-        servers::{
-            add_server, check_permissions, in_submission_channel, parse_role, Permission,
-            ServerRoleAction,
+        channel_groups::{get_group, in_submission_channel, ChannelGroup},
+        messages::{
+            build_listgroups_message, get_lb_msgs_data, get_submission_msg_data,
+            handle_new_race_messages, BotMessage,
         },
+        servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
     },
-    games::{determine_game, get_game_string, AsyncRaceData, NewAsyncRaceData, RaceType},
+    games::{get_game_boxed, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType},
     helpers::*,
 };
 
@@ -43,7 +44,7 @@ const REACT_COMMANDS: [&str; 6] = [
 
 #[hook]
 pub async fn before_hook(ctx: &Context, msg: &Message, _cmd_name: &str) -> bool {
-    // we check to see if we have the server in the share map
+    // before any command is run we check to see if we have the server in the share map
     // if not, we add it to the map and the database
     let server_check = {
         let data = ctx.data.read().await;
@@ -122,7 +123,7 @@ struct General;
 #[command]
 pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_game(&ctx, &msg, args, RaceType::IGT).await?;
+    start_race(&ctx, &msg, args, RaceType::IGT).await?;
 
     Ok(())
 }
@@ -130,7 +131,7 @@ pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 #[command]
 pub async fn rtastart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_game(&ctx, &msg, args, RaceType::RTA).await?;
+    start_race(&ctx, &msg, args, RaceType::RTA).await?;
 
     Ok(())
 }
@@ -318,7 +319,6 @@ pub async fn changeentry(ctx: &Context, msg: &Message, mut args: Args) -> Comman
     todo!();
 }
 
-#[inline]
 async fn set_role_from_command(
     ctx: &Context,
     msg: &Message,
@@ -364,7 +364,7 @@ async fn set_role_from_command(
     Ok(())
 }
 
-async fn start_game(
+async fn start_race(
     ctx: &Context,
     msg: &Message,
     mut args: Args,
@@ -372,25 +372,15 @@ async fn start_game(
 ) -> Result<(), BoxedError> {
     use crate::schema::async_races::columns::*;
     use crate::schema::async_races::dsl::*;
-    // use crate::schema::channels;
 
-    let server = msg.guild(&ctx).await.unwrap();
     // this command must be run in a submission channel
     if !in_submission_channel(&ctx, &msg).await {
         return Err(anyhow!("Games must be started in a submissions channel").into());
     }
-    let group = {
-        let data = ctx.data.read().await;
-        let group = data
-            .get::<GroupContainer>()
-            .expect("No group container in share map")
-            .get(msg.channel_id.as_u64())
-            .unwrap();
+    let group_fut = get_group(&ctx, &msg);
+    let conn_fut = get_connection(&ctx);
+    let (group, conn) = join!(group_fut, conn_fut);
 
-        group.clone()
-    };
-
-    let conn = get_connection(&ctx).await;
     // determine if a game is already running in this group. if yes, stop the game
     // before starting a new one.
     let maybe_active_race: Option<AsyncRaceData> = AsyncRaceData::belonging_to(&group)
@@ -399,31 +389,85 @@ async fn start_game(
         .get_result(&conn) // one active race per group at a time
         .ok();
     match maybe_active_race {
-        Some(_) => (), // call function that moves leaderboard and sets this race inactive
-        None => (), // this could potentially be done in a new thread while this function continues working?
+        Some(r) => stop_race(&ctx, &r).await?,
+        None => (),
     };
 
-    // parse the provided argument. determine game variety in generic way. build game string
-    // and make post in submission channel. we need to:
-    // 1. get string used for submission channel post
-    // 2. insert record in async_races table
-    let game = determine_game(&args);
-    let new_race_data = NewAsyncRaceData::new(&group.channel_group_id, game, this_race_type);
+    let game: BoxedGame = get_game_boxed(&args).await?;
+    let new_race_data =
+        NewAsyncRaceData::new_from_game(&game, &group.channel_group_id, this_race_type);
     insert_into(async_races)
         .values(&new_race_data)
         .execute(&conn)?;
-    // pull this struct back out to get the race id :shrug:
+
+    // pull this back out to get the race id :shrug:
+    // mysql does not support returning statements
     let race_data: AsyncRaceData = async_races
         .filter(channel_group_id.eq(&group.channel_group_id))
         .filter(race_active.eq(true))
         .get_result(&conn)?;
 
-    // create game string, post message in submission channel and leaderboard channel
+    // use boxed game to build and post messages in submission and leaderboard channels
     // add both messages to messages table. rows in this table belong to async races.
-    // we can pass references to new_race_data and args to a function here that will
-    let base_game_string = get_game_string(&args, &race_data);
+    handle_new_race_messages(&ctx, &group, &game, &race_data).await?;
 
-    todo!();
+    Ok(())
+}
+
+async fn stop_race(ctx: &Context, race: &AsyncRaceData) -> Result<()> {
+    use crate::schema::async_races;
+    use crate::schema::messages;
+    let conn = get_connection(&ctx).await;
+    diesel::update(race)
+        .set(async_races::race_active.eq(false))
+        .execute(&conn)?;
+
+    // there will always only be one submission message per race
+    let sub_msg_data = get_submission_msg_data(&conn, race.race_id)?;
+    let mut submission_msg = ctx
+        .http
+        .get_message(sub_msg_data.channel_id, sub_msg_data.message_id)
+        .await?;
+
+    // theoretically we already have a perfectly formed leaderboard in this group
+    // so we can just grab it then edit the submission msg + send any extras for
+    // larger leaderboards.
+    let mut leaderboard_msgs_data: Vec<BotMessage> = get_lb_msgs_data(&conn, race.race_id)?;
+    if leaderboard_msgs_data.len() == 0 {
+        // this should never happen
+        let err: &'static str =
+            "Tried to stop active game with no leaderboard messages in database";
+        error!("{}", &err);
+        return Err(anyhow!(err).into());
+    } else if leaderboard_msgs_data.len() == 1 {
+        let lb_msg_data = &leaderboard_msgs_data[0];
+        let lb_msg = ctx
+            .http
+            .get_message(lb_msg_data.channel_id, lb_msg_data.message_id)
+            .await?;
+        let sub_msg_fut = submission_msg.edit(&ctx, |m| m.content(&lb_msg.content));
+        let lb_msg_fut = lb_msg.delete(&ctx);
+        try_join!(sub_msg_fut, lb_msg_fut)?;
+    } else {
+        let sub_channel = ChannelId::from(sub_msg_data.channel_id);
+        let lb_msg_data = leaderboard_msgs_data.remove(0);
+        let lb_msg = ctx
+            .http
+            .get_message(lb_msg_data.channel_id, lb_msg_data.message_id)
+            .await?;
+        let sub_msg_fut = submission_msg.edit(&ctx, |m| m.content(&lb_msg.content));
+        let lb_msg_fut = lb_msg.delete(&ctx);
+        try_join!(sub_msg_fut, lb_msg_fut)?;
+        // we loop through the additional messages if we have a leaderboard > 1 message
+        for d in leaderboard_msgs_data.iter() {
+            let msg = ctx.http.get_message(d.channel_id, d.message_id).await?;
+            let sub_msg_fut = sub_channel.say(&ctx, &msg.content);
+            let lb_msg_fut = msg.delete(&ctx);
+            try_join!(sub_msg_fut, lb_msg_fut)?;
+        }
+    }
+
+    Ok(())
 }
 
 // #[command]

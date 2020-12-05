@@ -11,7 +11,10 @@ use diesel::{
 use serenity::{client::Context, model::id::GuildId, prelude::TypeMapKey};
 use uuid::Uuid;
 
-use crate::discord::{channel_groups::ChannelGroup, servers::DiscordServer};
+use crate::{
+    discord::{channel_groups::ChannelGroup, servers::DiscordServer},
+    games::AsyncGame,
+};
 
 pub type BoxedError = Box<dyn Error + Send + Sync>;
 pub type MysqlPool = Pool<ConnectionManager<MysqlConnection>>;

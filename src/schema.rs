@@ -27,9 +27,8 @@ table! {
         message_datetime -> Datetime,
         race_id -> Unsigned<Integer>,
         server_id -> Unsigned<Bigint>,
-        race_active -> Bool,
         channel_id -> Unsigned<Bigint>,
-        message_type -> Tinytext,
+        channel_type -> Tinytext,
     }
 }
 

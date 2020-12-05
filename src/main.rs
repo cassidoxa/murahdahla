@@ -32,7 +32,7 @@ use crate::{
     discord::{
         channel_groups::{get_groups, get_submission_channels, ChannelGroup},
         commands::{after_hook, before_hook, GENERAL_GROUP},
-        messages::Handler,
+        messages::{normal_message_hook, Handler},
         servers::get_servers,
     },
     helpers::*,
@@ -61,7 +61,8 @@ async fn main() -> anyhow::Result<()> {
         .configure(|c| c.prefix("!").allow_dm(false).owners(owners))
         .group(&GENERAL_GROUP)
         .before(before_hook)
-        .after(after_hook);
+        .after(after_hook)
+        .normal_message(normal_message_hook);
 
     let mut client = Client::builder(&token)
         .framework(framework)
@@ -69,11 +70,6 @@ async fn main() -> anyhow::Result<()> {
         .await
         .expect("Error creating client");
 
-    // get db pool, current servers, channels, permissions
-    // we need:
-    // hashset of current submission channels
-    // permissions struct
-    // groups struct
     {
         let mut data = client.data.write().await;
         let db_pool = get_pool(&database_url)?;

@@ -42,9 +42,8 @@ CREATE TABLE messages(
     message_datetime DATETIME NOT NULL,
     race_id INT UNSIGNED NOT NULL,
     server_id BIGINT(20) UNSIGNED NOT NULL,
-    race_active TINYINT(1) NOT NULL,
     channel_id BIGINT(20) UNSIGNED NOT NULL,
-    message_type TINYTEXT NOT NULL,
+    channel_type TINYTEXT NOT NULL,
     INDEX (race_id),
     FOREIGN KEY (race_id)
         REFERENCES async_races(race_id)
