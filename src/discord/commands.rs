@@ -29,7 +29,9 @@ use crate::{
         },
         servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
     },
-    games::{get_game_boxed, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType},
+    games::{
+        get_game_boxed, get_maybe_active_race, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType,
+    },
     helpers::*,
 };
 
@@ -78,7 +80,10 @@ pub async fn after_hook(
     let mut successful: bool = true;
     if let Err(e) = error {
         successful = false;
-        warn!("Error dispatching \"{}\" command: {:?}", cmd_name, e);
+        warn!(
+            "Error running \"{}\" command from user \"{}\": {:?}",
+            cmd_name, &msg.author.name, e
+        );
     }
     if REACT_COMMANDS.iter().any(|&c| c == cmd_name) {
         let reaction = match successful {
@@ -88,7 +93,10 @@ pub async fn after_hook(
         match msg.react(&ctx, reaction).await {
             Ok(_) => (),
             Err(e) => {
-                warn!("Error reaction to command \"{}\": {}", cmd_name, e);
+                warn!(
+                    "Error reacting to command \"{}\" from user \"{}\": {}",
+                    cmd_name, &msg.author.name, e
+                );
             }
         };
     }
@@ -99,6 +107,7 @@ pub async fn after_hook(
             .await
             .unwrap_or_else(|e| warn!("Error deleting message: {}", e));
     }
+    info!("Successfully executed command: {}", cmd_name);
 
     ()
 }
@@ -121,6 +130,7 @@ pub async fn after_hook(
 struct General;
 
 #[command]
+#[bucket = "startrace"]
 pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::IGT).await?;
@@ -129,6 +139,7 @@ pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 }
 
 #[command]
+#[bucket = "startrace"]
 pub async fn rtastart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::RTA).await?;
@@ -383,11 +394,7 @@ async fn start_race(
 
     // determine if a game is already running in this group. if yes, stop the game
     // before starting a new one.
-    let maybe_active_race: Option<AsyncRaceData> = AsyncRaceData::belonging_to(&group)
-        .filter(channel_group_id.eq(&group.channel_group_id))
-        .filter(race_active.eq(true)) // these filters may be extraneous as there should only be
-        .get_result(&conn) // one active race per group at a time
-        .ok();
+    let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
         Some(r) => stop_race(&ctx, &r).await?,
         None => (),

@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use chrono::{offset::Utc, NaiveDate};
+use chrono::{offset::Utc, NaiveDate, NaiveTime};
 use diesel::{
     backend::Backend,
     deserialize,
@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::{
     discord::{channel_groups::ChannelGroup, servers::DiscordServer},
     games::z3r::Z3rGame,
+    helpers::*,
     schema::*,
     BoxedError,
 };
@@ -70,7 +71,7 @@ impl NewAsyncRaceData {
     }
 }
 
-#[derive(Debug, Copy, Clone, FromSqlRow)]
+#[derive(Debug, Copy, Clone, PartialEq, FromSqlRow)]
 pub enum GameName {
     ALTTPR,
     SMZ3,
@@ -127,7 +128,7 @@ impl fmt::Display for GameName {
     }
 }
 
-#[derive(Debug, Copy, Clone, FromSqlRow)]
+#[derive(Debug, Copy, Clone, PartialEq, FromSqlRow)]
 pub enum RaceType {
     IGT,
     RTA,
@@ -210,4 +211,22 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
         GameName::ALTTPR => Ok(Box::new(Z3rGame::new_from_str(args.rest()).await?)),
         _ => todo!(),
     }
+}
+
+pub fn get_maybe_active_race(conn: &PooledConn, group: &ChannelGroup) -> Option<AsyncRaceData> {
+    use crate::schema::async_races::columns::*;
+    use crate::schema::async_races::dsl::*;
+
+    AsyncRaceData::belonging_to(group)
+        .filter(race_active.eq(true))
+        .get_result(conn)
+        .ok()
+}
+
+pub trait SRAM {
+    fn game_finished(&self) -> bool;
+
+    fn get_igt(&self) -> NaiveTime;
+
+    fn get_collection_rate<'a>(&'a self) -> Option<&'a str>;
 }

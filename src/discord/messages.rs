@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::{NaiveDate, NaiveDateTime};
 use diesel::prelude::*;
-use futures::try_join;
+use futures::{join, try_join};
 use serenity::{
     async_trait,
     framework::standard::macros::hook,
@@ -11,8 +11,11 @@ use serenity::{
 };
 
 use crate::{
-    discord::channel_groups::{in_submission_channel, ChannelGroup, ChannelType},
-    games::{AsyncRaceData, BoxedGame},
+    discord::{
+        channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
+        submissions::process_submission,
+    },
+    games::{get_maybe_active_race, AsyncRaceData, BoxedGame},
     helpers::*,
     schema::*,
 };
@@ -52,6 +55,7 @@ pub struct Handler;
 
 #[serenity::async_trait]
 impl EventHandler for Handler {
+    // we may not need an event handler since our hooks grab everything we need
     async fn message(&self, ctx: Context, msg: Message) {
         ()
     }
@@ -59,10 +63,38 @@ impl EventHandler for Handler {
 
 #[hook]
 pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
-    // the only non-command messages we're interested in are time submissions
-    if !in_submission_channel(&ctx, &msg).await {
+    // the only non-command messages we're interested in are time submissions from
+    // non bot users
+    if !in_submission_channel(&ctx, &msg).await
+        || (msg.author.id == { ctx.cache.current_user_id().await })
+    {
         return;
     }
+    let group_fut = get_group(&ctx, &msg);
+    let conn_fut = get_connection(&ctx);
+    let (group, conn) = join!(group_fut, conn_fut);
+
+    let maybe_active_race: Option<AsyncRaceData> = get_maybe_active_race(&conn, &group);
+    let race = match maybe_active_race {
+        Some(r) => r,
+        None => {
+            // if there's no active race we still want to delete messages and keep this
+            // channel tidy before returning
+            delete_sub_msg(&ctx, &msg).await;
+            return;
+        }
+    };
+
+    // here we parse a possible time submission. If we get a good submission, insert
+    // it into the database and we'll call a function to refresh the leaderboard from the
+    // db below
+    match process_submission(&ctx, &msg, &group, &race).await {
+        Ok(()) => (),
+        Err(e) => {
+            warn!("Error processing submission: {}", e);
+            return;
+        }
+    };
 
     ()
 }
@@ -173,6 +205,14 @@ pub fn get_submission_msg_data(conn: &PooledConn, this_race_id: u32) -> Result<B
         .first::<BotMessage>(conn)?;
 
     Ok(sub_message)
+}
+
+#[inline]
+async fn delete_sub_msg(ctx: &Context, msg: &Message) -> () {
+    let _ = msg
+        .delete(ctx)
+        .await
+        .map_err(|e| warn!("Error deleting message in submission channel: {}", e));
 }
 
 // #[serenity::async_trait]

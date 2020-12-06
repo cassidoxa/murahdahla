@@ -17,7 +17,7 @@ table! {
         submission -> Unsigned<Bigint>,
         leaderboard -> Unsigned<Bigint>,
         spoiler -> Unsigned<Bigint>,
-        spoiler_role -> Tinytext,
+        spoiler_role_id -> Unsigned<Bigint>,
     }
 }
 
@@ -48,7 +48,7 @@ table! {
         race_id -> Unsigned<Integer>,
         submission_datetime -> Datetime,
         runner_name -> Varchar,
-        runner_time -> Time,
+        runner_time -> Nullable<Time>,
         runner_collection -> Nullable<Unsigned<Smallint>>,
         option_number -> Nullable<Unsigned<Integer>>,
         option_text -> Nullable<Tinytext>,

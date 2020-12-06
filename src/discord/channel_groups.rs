@@ -41,7 +41,7 @@ pub struct ChannelGroup {
     pub submission: u64,
     pub leaderboard: u64,
     pub spoiler: u64,
-    pub spoiler_role: String,
+    pub spoiler_role_id: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,11 +60,11 @@ impl ChannelGroup {
     pub async fn new_from_yaml(
         msg: &Message,
         ctx: &Context,
-        yaml: &[u8],
+        yaml_bytes: &[u8],
     ) -> Result<Self, BoxedError> {
         use serde_yaml;
 
-        let yaml: ChannelGroupYaml = match serde_yaml::from_slice(yaml) {
+        let yaml: ChannelGroupYaml = match serde_yaml::from_slice(yaml_bytes) {
             Ok(g) => g,
             Err(e) => return Err(Box::new(e) as BoxedError),
         };
@@ -98,6 +98,15 @@ impl ChannelGroup {
                 )
             }
         };
+        let spoiler_role_id = match server.role_by_name(&yaml.spoiler_role) {
+            Some(r) => r.id,
+            None => {
+                return Err(anyhow!(
+                    "Could not get spoiler channel role id from role name provided in yaml"
+                )
+                .into())
+            }
+        };
 
         let new_group = ChannelGroup {
             channel_group_id: yaml.channel_group_id,
@@ -106,9 +115,9 @@ impl ChannelGroup {
             submission: *submission_channel_id.as_u64(),
             leaderboard: *leaderboard_channel_id.as_u64(),
             spoiler: *spoiler_channel_id.as_u64(),
-            spoiler_role: yaml.spoiler_role.clone(),
+            spoiler_role_id: *spoiler_role_id.as_u64(),
         };
-        validate_new_group(&ctx, &msg, &new_group).await?;
+        validate_new_group(&ctx, &msg, &new_group, &yaml.spoiler_role).await?;
 
         Ok(new_group)
     }
@@ -166,9 +175,10 @@ async fn validate_new_group(
     ctx: &Context,
     msg: &Message,
     new_group: &ChannelGroup,
+    spoiler_role_name: &str,
 ) -> Result<(), BoxedError> {
     // check to make sure the group & role names are < 255 characters
-    if [&new_group.group_name, &new_group.spoiler_role]
+    if [&new_group.group_name, spoiler_role_name]
         .iter()
         .any(|&s| s.len() > 255usize)
     {
@@ -253,6 +263,8 @@ pub fn get_groups(conn: &PooledConn) -> Result<HashMap<u64, ChannelGroup>> {
 }
 
 pub async fn get_group(ctx: &Context, msg: &Message) -> ChannelGroup {
+    // this should only be called when we've checked that the message is in
+    // a submission channel so we know there is a group in the map
     let data = ctx.data.read().await;
     let group = data
         .get::<GroupContainer>()

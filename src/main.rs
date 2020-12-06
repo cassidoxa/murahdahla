@@ -47,22 +47,16 @@ async fn main() -> anyhow::Result<()> {
         .expect("Expected MURAHDAHLA_DISCORD_TOKEN in the environment.");
     let database_url = env::var("MURAHDAHLA_DATABASE_URL")
         .expect("Expected MURAHDAHLA_DATABASE_URL in the environment");
-    let http = Http::new_with_token(&token);
-    let (owners, _bot_id) = match http.get_current_application_info().await {
-        Ok(info) => {
-            let mut owners = HashSet::new();
-            owners.insert(info.owner.id);
-
-            (owners, info.id)
-        }
-        Err(e) => panic!("Could not access application info: {:?}", e),
-    };
     let framework = StandardFramework::new()
-        .configure(|c| c.prefix("!").allow_dm(false).owners(owners))
+        .configure(|c| c.prefix("!").allow_dm(false))
         .group(&GENERAL_GROUP)
         .before(before_hook)
         .after(after_hook)
-        .normal_message(normal_message_hook);
+        .normal_message(normal_message_hook)
+        // race starting commands may make calls to 3rd party services so let's put a nominal
+        // rate limit on them
+        .bucket("startrace", |b| b.delay(10))
+        .await;
 
     let mut client = Client::builder(&token)
         .framework(framework)

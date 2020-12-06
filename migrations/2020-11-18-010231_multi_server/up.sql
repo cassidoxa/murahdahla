@@ -18,7 +18,7 @@ CREATE TABLE channels(
     submission BIGINT(20) UNSIGNED NOT NULL,
     leaderboard BIGINT(20) UNSIGNED NOT NULL,
     spoiler BIGINT(20) UNSIGNED NOT NULL,
-    spoiler_role TINYTEXT NOT NULL,
+    spoiler_role_id BIGINT(20) UNSIGNED NOT NULL,
     FOREIGN KEY (server_id)
         REFERENCES servers(server_id)
         ON DELETE CASCADE
@@ -66,7 +66,7 @@ CREATE TABLE submissions(
     race_id INT UNSIGNED NOT NULL,
     submission_datetime DATETIME NOT NULL,
     runner_name VARCHAR(32) NOT NULL,
-    runner_time TIME NOT NULL,
+    runner_time TIME,
     runner_collection SMALLINT(3) UNSIGNED,
     option_number INT UNSIGNED,
     option_text TINYTEXT,

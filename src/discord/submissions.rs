@@ -1,7 +1,23 @@
-use chrono::{NaiveDateTime, NaiveTime};
+use anyhow::Result;
+use chrono::{NaiveDateTime, NaiveTime, Utc};
 use diesel::prelude::*;
+use serenity::{
+    client::Context,
+    model::{channel::Message, id::RoleId},
+};
 
-use crate::{games::AsyncRaceData, schema::*};
+use crate::{
+    discord::channel_groups::ChannelGroup,
+    games::{AsyncRaceData, GameName, RaceType},
+    helpers::*,
+    schema::*,
+};
+
+// list of games we've implemented parsing IGT from a file (SRAM) for
+const IGT_GAMES: [GameName; 1] = [GameName::ALTTPR];
+
+// some strings we'll compare with to check if a user has forfeited
+const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
 
 #[derive(Debug, Insertable, Queryable, Identifiable, Associations)]
 #[belongs_to(parent = "AsyncRaceData", foreign_key = "race_id")]
@@ -13,11 +29,89 @@ pub struct Submission {
     pub race_id: u32,
     pub submission_datetime: NaiveDateTime,
     pub runner_name: String,
-    pub runner_time: NaiveTime,
+    pub runner_time: Option<NaiveTime>,
     pub runner_collection: Option<u16>,
     pub option_number: Option<u32>,
     pub option_text: Option<String>,
     pub runner_forfeit: bool,
+}
+
+pub async fn process_submission(
+    ctx: &Context,
+    msg: &Message,
+    group: &ChannelGroup,
+    race: &AsyncRaceData,
+) -> Result<()> {
+    // how we process this depends on game, IGT or RTA, and whether or not we have
+    // an attached save file we can parse for IGT. The purpose of this function is
+    // only to process then add a good submission to the database.
+    let conn = get_connection(&ctx).await;
+    let mut maybe_submission: Vec<&str> =
+        msg.content.as_str().trim_end().split_whitespace().collect();
+    // first check to see if the user has forfeited
+    if FORFEIT.iter().any(|&x| x == maybe_submission[0]) {
+        process_forfeit(&ctx, &msg, &group, &race).await?;
+        return Ok(());
+    }
+    // if we have an attachment, an IGT game, and a game that we can read the save file
+    // of, we can try to do that
+    if race.race_type == RaceType::IGT
+        && IGT_GAMES.iter().any(|&g| g == race.race_game)
+        && msg.attachments.len() == 1
+    {
+        // this can fail so if someone attaches a save let's assume they're not also
+        // writing their time etc and return if it fails
+        process_sram(&ctx, &msg, &group, &race).await?;
+        return Ok(());
+    }
+    todo!();
+}
+
+async fn process_forfeit(
+    ctx: &Context,
+    msg: &Message,
+    group: &ChannelGroup,
+    race: &AsyncRaceData,
+) -> Result<()> {
+    use crate::schema::submissions::columns::*;
+    use crate::schema::submissions::dsl::*;
+
+    let submission = Submission {
+        submission_id: None,
+        runner_id: *msg.author.id.as_u64(),
+        race_id: race.race_id,
+        submission_datetime: Utc::now().naive_utc(),
+        runner_name: msg.author.name.clone(),
+        runner_time: None,
+        runner_collection: None,
+        option_number: None,
+        option_text: None,
+        runner_forfeit: true,
+    };
+    let conn = get_connection(&ctx).await;
+    diesel::insert_into(submissions)
+        .values(&submission)
+        .execute(&conn)?;
+    let mut member = msg.member(&ctx).await?;
+    let _ = member.add_role(&ctx, group.spoiler_role_id).await?;
+    info!(
+        "Successfully processed submission for user \"{}\"",
+        &msg.author.name
+    );
+
+    Ok(())
+}
+
+async fn process_sram(
+    ctx: &Context,
+    msg: &Message,
+    group: &ChannelGroup,
+    race: &AsyncRaceData,
+) -> Result<()> {
+    use crate::schema::submissions::columns::*;
+    use crate::schema::submissions::dsl::*;
+
+    todo!();
 }
 
 // fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), SubmissionError> {
