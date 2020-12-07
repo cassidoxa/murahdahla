@@ -14,7 +14,7 @@ CREATE TABLE servers(
 CREATE TABLE channels(
     channel_group_id BINARY(16) PRIMARY KEY,
     server_id BIGINT(20) UNSIGNED NOT NULL,
-    group_name TINYTEXT NOT NULL UNIQUE,
+    group_name TINYTEXT NOT NULL,
     submission BIGINT(20) UNSIGNED NOT NULL,
     leaderboard BIGINT(20) UNSIGNED NOT NULL,
     spoiler BIGINT(20) UNSIGNED NOT NULL,

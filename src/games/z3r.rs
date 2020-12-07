@@ -1,3 +1,5 @@
+use std::{convert::TryFrom, str::FromStr};
+
 use anyhow::{anyhow, Error, Result};
 use chrono::naive::NaiveDate;
 use reqwest::get;
@@ -5,6 +7,7 @@ use serde_json::{from_value, Value};
 use url::Url;
 
 use crate::{
+    discord::submissions::Submission,
     games::{AsyncGame, GameName, RaceType},
     helpers::BoxedError,
 };
@@ -16,10 +19,8 @@ pub struct Z3rGame {
 
 impl Z3rGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        // we know we have an alttpr.com url here. let's make sure it's actually
-        // a link to an existing game and not something else
-        // it seems that we can't use a double ended iter to search here without unstable
-        // but if the url contains "/h/" we should be good
+        // we know we have an alttpr.com url. let's verify it's a link to a
+        // generated game. if the url contains "/h/" we should be good
         match args_str.contains("/h/") {
             true => (),
             false => return Err(anyhow!("alttpr.com link does not contain a game").into()),
@@ -44,6 +45,27 @@ async fn get_patch(game_id: &str) -> Result<Value> {
     let patch_json = get(url_string.as_str()).await?.json().await?;
 
     Ok(patch_json)
+}
+
+pub struct Z3rCollectionRate(u16);
+
+impl TryFrom<u16> for Z3rCollectionRate {
+    type Error = BoxedError;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        if value > 216 {
+            Err(anyhow!("ALTTPR Collection Rate must be a number from 0 to 216").into())
+        } else {
+            Ok(Z3rCollectionRate(value))
+        }
+    }
+}
+
+// we implement Into here because this only works one way
+impl Into<u16> for Z3rCollectionRate {
+    fn into(self) -> u16 {
+        self.0
+    }
 }
 
 impl AsyncGame for Z3rGame {
@@ -167,7 +189,7 @@ impl AsyncGame for Z3rGame {
 fn get_code(patch: &Value) -> Vec<&'static str> {
     // we have to search for the code values here, they will not always
     // be located at the same position in the json
-    // TODO: sort & binary search
+    // TODO: sort & binary search??
     let mut code: Vec<&'static str> = Vec::with_capacity(5);
     for i in patch.as_array().unwrap().iter() {
         if i.as_object().unwrap().contains_key("1573397") {
@@ -219,4 +241,24 @@ const fn code_map(value: u8) -> &'static str {
         31 => "Key",
         _ => "Unknown",
     }
+}
+
+pub fn game_info<'a>(
+    submission: &'a mut Submission,
+    msg: &Vec<&str>,
+) -> Result<&'a mut Submission, BoxedError> {
+    // for alttpr we just use the collection rate by default. we could also set one of
+    // the optional values here if we wanted to take some other input. suppose we
+    // wanted a bonk counter for example
+
+    // but first we make sure there's enough elements in the vec to maybe use
+    if msg.len() != 1 {
+        return Err(anyhow!("ALTTPR submission did not include collection rate.").into());
+    }
+
+    let number = u16::from_str(&msg[0])?;
+    let collection = Z3rCollectionRate::try_from(number)?;
+    submission.set_collection(Some(collection));
+
+    Ok(submission)
 }

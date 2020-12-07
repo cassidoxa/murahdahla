@@ -158,3 +158,10 @@ pub async fn add_server(ctx: &Context, msg: &Message) -> Result<()> {
 
     Ok(())
 }
+
+pub async fn add_spoiler_role(ctx: &Context, msg: &Message, role_id: u64) -> Result<()> {
+    let mut member = msg.member(&ctx).await?;
+    let _ = member.add_role(&ctx, role_id).await?;
+
+    Ok(())
+}

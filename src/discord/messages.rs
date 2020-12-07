@@ -13,6 +13,7 @@ use serenity::{
 use crate::{
     discord::{
         channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
+        servers::add_spoiler_role,
         submissions::process_submission,
     },
     games::{get_maybe_active_race, AsyncRaceData, BoxedGame},
@@ -91,10 +92,27 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     match process_submission(&ctx, &msg, &group, &race).await {
         Ok(()) => (),
         Err(e) => {
+            // this is a complicated function that can fail in several ways. we may want
+            // to log warn or error depending. for now we will simply make duplicate
+            // logs if we want an error log
             warn!("Error processing submission: {}", e);
             return;
         }
     };
+    match add_spoiler_role(&ctx, &msg, group.spoiler_role_id).await {
+        Ok(()) => (),
+        Err(e) => {
+            warn!(
+                "Error giving spoiler role to user \"{}\": {}",
+                &msg.author.name, e
+            );
+            return;
+        }
+    };
+
+    // refresh leaderboard from db
+
+    delete_sub_msg(&ctx, &msg).await;
 
     ()
 }

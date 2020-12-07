@@ -223,10 +223,14 @@ pub fn get_maybe_active_race(conn: &PooledConn, group: &ChannelGroup) -> Option<
         .ok()
 }
 
-pub trait SRAM {
-    fn game_finished(&self) -> bool;
+pub trait SaveReader {
+    fn game_finished(&self, game: GameName) -> bool;
 
-    fn get_igt(&self) -> NaiveTime;
+    fn get_igt(&self, game: GameName) -> NaiveTime;
 
-    fn get_collection_rate<'a>(&'a self) -> Option<&'a str>;
+    fn get_collection_rate(&self, game: GameName) -> Option<u64>;
 }
+
+// impl SaveReader for &[u8] {
+//
+// }

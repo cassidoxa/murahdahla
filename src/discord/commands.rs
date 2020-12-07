@@ -28,6 +28,7 @@ use crate::{
             handle_new_race_messages, BotMessage,
         },
         servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
+        submissions::Submission,
     },
     games::{
         get_game_boxed, get_maybe_active_race, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType,
@@ -396,7 +397,7 @@ async fn start_race(
     // before starting a new one.
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
-        Some(r) => stop_race(&ctx, &r).await?,
+        Some(r) => stop_race(&ctx, &r, &group).await?,
         None => (),
     };
 
@@ -421,7 +422,7 @@ async fn start_race(
     Ok(())
 }
 
-async fn stop_race(ctx: &Context, race: &AsyncRaceData) -> Result<()> {
+async fn stop_race(ctx: &Context, race: &AsyncRaceData, group: &ChannelGroup) -> Result<()> {
     use crate::schema::async_races;
     use crate::schema::messages;
     let conn = get_connection(&ctx).await;
@@ -472,6 +473,40 @@ async fn stop_race(ctx: &Context, race: &AsyncRaceData) -> Result<()> {
             let lb_msg_fut = msg.delete(&ctx);
             try_join!(sub_msg_fut, lb_msg_fut)?;
         }
+    }
+
+    // remove spoiler roles to revoke access to spoiler channel when game is over
+    remove_spoiler_roles(&ctx, &group, &race).await?;
+
+    Ok(())
+}
+
+async fn remove_spoiler_roles(
+    ctx: &Context,
+    group: &ChannelGroup,
+    race: &AsyncRaceData,
+) -> Result<()> {
+    // collect the user ids of everyone with a submission in this race
+    // so we can use them to remove the spoiler role when the race has stopped
+    use crate::schema::submissions::columns::*;
+    use crate::schema::submissions::dsl::*;
+
+    let conn = get_connection(&ctx).await;
+    let user_ids = Submission::belonging_to(race)
+        .select(runner_id)
+        .load::<u64>(&conn)?;
+    for id in user_ids {
+        let mut member = match ctx.http.get_member(group.server_id, id).await {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Error getting member from id: {}", e);
+                continue;
+            }
+        };
+        match &member.remove_role(&ctx, group.spoiler_role_id).await {
+            Ok(()) => (),
+            Err(e) => warn!("Error removing role: {}", e),
+        };
     }
 
     Ok(())
