@@ -1,15 +1,21 @@
-use std::default::Default;
+use std::{default::Default, fmt};
 
 use anyhow::{anyhow, Error, Result};
-use chrono::{NaiveDateTime, NaiveTime, Utc};
+use chrono::{Duration, NaiveDateTime, NaiveTime, Utc};
 use diesel::prelude::*;
 use serenity::{
     client::Context,
-    model::{channel::Message, id::RoleId},
+    model::{
+        channel::Message,
+        id::{ChannelId, RoleId},
+    },
 };
 
 use crate::{
-    discord::channel_groups::ChannelGroup,
+    discord::{
+        channel_groups::{ChannelGroup, ChannelType},
+        messages::BotMessage,
+    },
     games::{z3r, AsyncRaceData, GameName, RaceType},
     helpers::*,
     schema::*,
@@ -21,14 +27,67 @@ const IGT_GAMES: [GameName; 1] = [GameName::ALTTPR];
 // some strings we'll compare with to check if a user has forfeited
 const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
 
-#[derive(Debug, Clone, Insertable, Queryable, Identifiable, Associations)]
+#[derive(Debug, Insertable, Queryable, Identifiable, Associations)]
 #[belongs_to(parent = "AsyncRaceData", foreign_key = "race_id")]
 #[table_name = "submissions"]
 #[primary_key(submission_id)]
 pub struct Submission {
-    pub submission_id: Option<u32>,
+    pub submission_id: u32,
     pub runner_id: u64,
     pub race_id: u32,
+    pub race_game: GameName,
+    pub submission_datetime: NaiveDateTime,
+    pub runner_name: String,
+    pub runner_time: Option<NaiveTime>,
+    pub runner_collection: Option<u16>,
+    pub option_number: Option<u32>,
+    pub option_text: Option<String>,
+    pub runner_forfeit: bool,
+}
+
+impl fmt::Display for Submission {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.race_game {
+            GameName::ALTTPR => write!(
+                f,
+                "{} - {} - {}/216",
+                self.runner_name,
+                self.runner_time.unwrap(),
+                self.runner_collection.unwrap()
+            ),
+            GameName::SMZ3 => write!(
+                f,
+                "{} - {} - {}/316",
+                self.runner_name,
+                self.runner_time.unwrap(),
+                self.runner_collection.unwrap()
+            ),
+            GameName::FF4FE => write!(f, "{} - {}", self.runner_name, self.runner_time.unwrap()),
+            GameName::SMVARIA => write!(
+                f,
+                "({} - {} - {}%)",
+                self.runner_name,
+                self.runner_time.unwrap(),
+                self.runner_collection.unwrap()
+            ),
+            GameName::SMTotal => write!(
+                f,
+                "({} - {} - {}%)",
+                self.runner_name,
+                self.runner_time.unwrap(),
+                self.runner_collection.unwrap()
+            ),
+            GameName::Other => write!(f, "{} - {}", self.runner_name, self.runner_time.unwrap()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[table_name = "submissions"]
+pub struct NewSubmission {
+    pub runner_id: u64,
+    pub race_id: u32,
+    pub race_game: GameName,
     pub submission_datetime: NaiveDateTime,
     pub runner_name: String,
     pub runner_time: Option<NaiveTime>,
@@ -40,7 +99,7 @@ pub struct Submission {
     pub runner_forfeit: bool,
 }
 
-impl Submission {
+impl NewSubmission {
     fn set_runner_id<T: Into<u64>>(&mut self, id: T) -> &mut Self {
         self.runner_id = id.into();
 
@@ -104,19 +163,22 @@ impl Submission {
         // with a non-mutable cloned Self since this will be the final building method
 
         // i feel like there is a more elegant way to do this but this works for now
+
+        self.race_game = game;
         match game {
             GameName::ALTTPR => Ok(z3r::game_info(self, submission_msg)?.clone()),
+            GameName::Other => Ok(self.clone()),
             _ => Err(anyhow!("Game not yet implemented").into()),
         }
     }
 }
 
-impl Default for Submission {
+impl Default for NewSubmission {
     fn default() -> Self {
-        Submission {
-            submission_id: None,
+        NewSubmission {
             runner_id: 0u64,
             race_id: 0u32,
+            race_game: GameName::Other,
             submission_datetime: Utc::now().naive_utc(),
             runner_name: String::new(),
             runner_time: None,
@@ -195,7 +257,7 @@ pub async fn process_submission(
         }
     };
 
-    let mut submission = Submission::default()
+    let mut submission = NewSubmission::default()
         .set_runner_id(msg.author.id)
         .set_race_id(race.race_id)
         .name(&msg.author.name)
@@ -217,10 +279,10 @@ async fn insert_forfeit(
     use crate::schema::submissions::columns::*;
     use crate::schema::submissions::dsl::*;
 
-    let submission = Submission {
-        submission_id: None,
+    let submission = NewSubmission {
         runner_id: *msg.author.id.as_u64(),
         race_id: race.race_id,
+        race_game: race.race_game,
         submission_datetime: Utc::now().naive_utc(),
         runner_name: msg.author.name.clone(),
         runner_time: None,
@@ -257,215 +319,137 @@ fn igt_attachment_check(msg: &Message, race: &AsyncRaceData) -> bool {
         && msg.attachments.len() == 1
 }
 
-// fn process_time_submission(ctx: &Context, msg: &Message) -> Result<(), SubmissionError> {
-//     let guild_id = match msg.guild_id {
-//         Some(id) => id,
-//         None => {
-//             let err_msg = format!("Error unwrapping guild id from Message");
-//             return Err(SubmissionError::new(&err_msg));
-//         }
-//     };
-//     let guild = guild_id.to_partial_guild(&ctx.http)?;
-//     let runner_id = msg.author.id;
-//     let runner_name = msg.author.name.as_str();
-//     let spoiler_role = match get_spoiler_role(&guild) {
-//         Ok(role) => role,
-//         Err(e) => {
-//             let err_msg: String = format!(
-//                 "Submission Error: Couldn't get spoiler role from REST API: {}",
-//                 e
-//             );
-//             return Err(SubmissionError::new(&err_msg));
-//         }
-//     };
-//
-//     let mut maybe_submission: Vec<&str> =
-//         msg.content.as_str().trim_end().split_whitespace().collect();
-//
-//     let data = ctx.data.read();
-//     let db_pool = data
-//         .get::<DBConnectionContainer>()
-//         .expect("Expected DB pool in ShareMap. Please check environment variables.");
-//
-//     let ff = vec!["ff", "FF", "forfeit", "Forfeit"];
-//     if ff.iter().any(|&x| x == maybe_submission[0]) {
-//         info!("User forfeited: {}", &msg.author.name);
-//         let mut current_member = match msg.member(ctx) {
-//             Some(member) => member,
-//             None => {
-//                 let err_string: String =
-//                     format!("Error getting PartialMember data from {}", &msg.author.name);
-//                 return Err(SubmissionError::new(&err_string));
-//             }
-//         };
-//         match current_member.add_role(ctx, spoiler_role) {
-//             Ok(()) => (),
-//             Err(e) => {
-//                 warn!("Processing submission: Error adding role: {}", e);
-//                 return Ok(());
-//             }
-//         };
-//         create_submission_entry(
-//             db_pool,
-//             runner_name,
-//             *runner_id.as_u64(),
-//             NaiveTime::from_hms(0, 0, 0),
-//             0,
-//             true,
-//         )?;
-//         return Ok(());
-//     }
-//     if maybe_submission.len() != 2 {
-//         return Ok(());
-//     }
-//
-//     let maybe_time: &str = &maybe_submission.remove(0).replace("\\", "");
-//     let submission_time = match NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S") {
-//         Ok(submission_time) => submission_time,
-//         Err(_e) => {
-//             info!(
-//                 "Processing submission: Incorrectly formatted time from {}: {}",
-//                 &msg.author.name, &maybe_time
-//             );
-//             return Ok(());
-//         }
-//     };
-//
-//     let maybe_collect: &str = maybe_submission.remove(0);
-//     let submission_collect = match maybe_collect.parse::<u16>() {
-//         Ok(submission_collect) => submission_collect,
-//         Err(_e) => {
-//             info!(
-//                 "Processing submission: Collection rate couldn't be parsed into 8-bit integer: {} : {}",
-//                 &msg.author.name, &maybe_collect
-//             );
-//             return Ok(());
-//         }
-//     };
-//
-//     let mut current_member = match msg.member(ctx) {
-//         Some(member) => member,
-//         None => {
-//             info!(
-//                 "Failed retrieving member data from server message. Falling back to http request."
-//             );
-//             match ctx
-//                 .http
-//                 .get_member(u64::from(guild_id), u64::from(msg.author.id))
-//             {
-//                 Ok(member) => member,
-//                 Err(e) => {
-//                     warn!("Error getting member data via http request: {}", e);
-//                     return Ok(());
-//                 }
-//             }
-//         }
-//     };
-//
-//     match current_member.add_role(ctx, spoiler_role) {
-//         Ok(()) => (),
-//         Err(e) => {
-//             warn!(
-//                 "Processing submission: Couldn't add spoiler role to {}. Error: {}",
-//                 &msg.author.name, e
-//             );
-//             return Ok(());
-//         }
-//     };
-//
-//     create_submission_entry(
-//         db_pool,
-//         runner_name,
-//         *runner_id.as_u64(),
-//         submission_time,
-//         submission_collect,
-//         false,
-//     )?;
-//
-//     info!(
-//         "Submission successfully accepted: {} {} {}",
-//         runner_name, submission_time, submission_collect
-//     );
-//     Ok(())
-// }
-//
-// fn update_leaderboard(ctx: &Context, guild_id: u64) -> Result<()> {
-//     let current_time: NaiveDateTime = Utc::now().naive_utc();
-//     let data = ctx.data.read();
-//     let db_pool = data
-//         .get::<DBConnectionContainer>()
-//         .expect("Expected DB pool in ShareMap.");
-//     let leaderboard_channel: u64 = *data
-//         .get::<ChannelContainer>()
-//         .expect("No submission channel in the environment")
-//         .get("leaderboard_channel")
-//         .unwrap()
-//         .as_u64();
-//
-//     let all_submissions: Vec<OldSubmission> = match get_leaderboard(db_pool) {
-//         Ok(leaderboard) => leaderboard,
-//         Err(e) => {
-//             warn!("Error getting leaderboard submissios from db: {}", e);
-//             return Ok(());
-//         }
-//     };
-//
-//     let leaderboard_posts: Vec<Post> = match get_leaderboard_posts(&leaderboard_channel, db_pool) {
-//         Ok(posts) => posts,
-//         Err(e) => {
-//             warn!("Error retrieving leaderboard post data from db: {}", e);
-//             return Ok(());
-//         }
-//     };
-//
-//     let lb_string_allocation: usize = (&all_submissions.len() * 40) + 150;
-//     let mut leaderboard_string = String::with_capacity(lb_string_allocation);
-//     let first_post = match ctx
-//         .http
-//         .get_message(leaderboard_channel, leaderboard_posts[0].post_id)
-//     {
-//         Ok(post) => post,
-//         Err(e) => {
-//             warn!("Error retrieving leaderboard header: {}", e);
-//             return Ok(());
-//         }
-//     };
-//     let leaderboard_header = &first_post.content.split("\n").collect::<Vec<&str>>()[0];
-//     let mut runner_position: u32 = 1;
-//     leaderboard_string.push_str(format!("{}\n", leaderboard_header).as_str());
-//     all_submissions
-//         .iter()
-//         .filter(|&f| f.runner_forfeit == false)
-//         .for_each(|s| {
-//             if &current_time.timestamp() - s.submission_datetime.timestamp() > 21600 {
-//                 leaderboard_string.push_str(
-//                     format!(
-//                         "\n{}) {} - {} - {}/216",
-//                         runner_position, s.runner_name, s.runner_time, s.runner_collection
-//                     )
-//                     .as_str(),
-//                 );
-//                 runner_position += 1;
-//             } else {
-//                 leaderboard_string.push_str(
-//                     format!(
-//                         "\n{}) *{}* - {} - {}/216",
-//                         runner_position, s.runner_name, s.runner_time, s.runner_collection
-//                     )
-//                     .as_str(),
-//                 );
-//                 runner_position += 1;
-//             }
-//         });
-//
-//     fill_leaderboard_update(
-//         ctx,
-//         db_pool,
-//         guild_id,
-//         leaderboard_string,
-//         leaderboard_posts,
-//         leaderboard_channel,
-//     )?;
-//
-//     Ok(())
-// }
+pub async fn refresh_leaderboard(
+    ctx: &Context,
+    group: &ChannelGroup,
+    race: &AsyncRaceData,
+) -> Result<(), BoxedError> {
+    // the caller needs to have checked if there is currently an active race
+    // which means we have a leaderboard message to work with
+    use crate::schema::messages::columns::*;
+    use crate::schema::submissions::columns::runner_forfeit;
+
+    let conn = get_connection(&ctx).await;
+    // collect a vector of submissions for this race and sort it
+    // we will feed these to a formatting closure that decides how to
+    // display them
+    let mut leaderboard: Vec<Submission> = Submission::belonging_to(race)
+        .filter(runner_forfeit.eq(false))
+        .load::<Submission>(&conn)?;
+    leaderboard.sort_by(|a, b| {
+        b.runner_time
+            .cmp(&a.runner_time)
+            .reverse()
+            .then(b.runner_collection.cmp(&a.runner_collection).reverse())
+            .then(b.option_number.cmp(&a.option_number).reverse())
+    });
+
+    // grab the top post, get the "header," construct one formatted string with every
+    // submission we want to display.
+    let time_now = Utc::now().naive_utc();
+    let mut lb_posts_data: Vec<BotMessage> = BotMessage::belonging_to(race)
+        .filter(channel_type.eq(ChannelType::Leaderboard))
+        .load::<BotMessage>(&conn)?;
+    lb_posts_data.sort_by(|a, b| b.message_datetime.cmp(&a.message_datetime).reverse());
+    let top_lb_post = ctx
+        .http
+        .get_message(group.leaderboard, lb_posts_data[0].message_id)
+        .await?;
+    // approximating how much to allocate here
+    let leaderboard_header = &top_lb_post.content.split("\n").collect::<Vec<&str>>()[0];
+    let mut lb_string = String::with_capacity(leaderboard.len() * 40 + 150);
+    let mut count: u32 = 1;
+    lb_string.push_str(format!("{}\n", leaderboard_header).as_str());
+    leaderboard.iter().for_each(|s| {
+        if time_now - s.submission_datetime > Duration::seconds(21600i64) {
+            lb_string.push_str(format!("\n{}) {}", count, &s).as_str());
+            count += 1;
+        } else {
+            lb_string.push_str(format!("\n{}) *{}*", count, &s).as_str());
+            count += 1;
+        }
+    });
+
+    fill_leaderboard(&ctx, &group, &mut lb_posts_data, &lb_string).await?;
+
+    Ok(())
+}
+
+async fn fill_leaderboard(
+    ctx: &Context,
+    group: &ChannelGroup,
+    lb_posts_data: &mut Vec<BotMessage>,
+    lb_string: &String,
+) -> Result<(), BoxedError> {
+    let necessary_posts: usize = lb_string.len() / 2000 + 1;
+    if necessary_posts > lb_posts_data.len() {
+        resize_leaderboard(&ctx, &group, lb_posts_data).await?;
+    }
+    // fill buffer then send the post until there's no more
+    let mut post_buffer = String::with_capacity(2000);
+    let mut post_iterator = lb_posts_data.into_iter().peekable();
+    let mut submission_iterator = lb_string
+        .split("\n")
+        .collect::<Vec<&str>>()
+        .into_iter()
+        .peekable();
+
+    loop {
+        if post_iterator.peek().is_none() {
+            return Err(anyhow!("Ran out of space for leaderboard").into());
+        }
+
+        match submission_iterator.peek() {
+            Some(line) => {
+                if line.len() + &post_buffer.len() <= 2000 {
+                    post_buffer
+                        .push_str(format!("\n{}", submission_iterator.next().unwrap()).as_str())
+                } else if line.len() + post_buffer.len() > 2000 {
+                    let mut post = ctx
+                        .http
+                        .get_message(group.leaderboard, post_iterator.next().unwrap().message_id)
+                        .await?;
+                    post.edit(ctx, |x| x.content(&post_buffer)).await?;
+                    post_buffer.clear();
+                }
+            }
+            None => {
+                let mut post = ctx
+                    .http
+                    .get_message(group.leaderboard, post_iterator.next().unwrap().message_id)
+                    .await?;
+                post.edit(ctx, |x| x.content(post_buffer)).await?;
+                break;
+            }
+        };
+    }
+
+    Ok(())
+}
+
+async fn resize_leaderboard<'a>(
+    ctx: &Context,
+    group: &ChannelGroup,
+    lb_posts: &'a mut Vec<BotMessage>,
+) -> Result<&'a mut Vec<BotMessage>, BoxedError> {
+    use crate::schema::messages::columns::*;
+    use crate::schema::messages::dsl::*;
+    // we only ever need one more post than we have to hold all submissions
+    let conn = get_connection(&ctx).await;
+    let new_message: Message = ChannelId::from(group.leaderboard)
+        .say(&ctx, "Placeholder")
+        .await?;
+    let new_msg_data = BotMessage::from_serenity_msg(
+        &new_message,
+        group.server_id,
+        lb_posts[0].race_id,
+        ChannelType::Leaderboard,
+    );
+
+    diesel::insert_into(messages)
+        .values(&new_msg_data)
+        .execute(&conn)?;
+    lb_posts.push(new_msg_data);
+
+    Ok(lb_posts)
+}

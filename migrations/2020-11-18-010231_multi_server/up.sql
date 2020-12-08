@@ -64,6 +64,7 @@ CREATE TABLE submissions(
     submission_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     runner_id BIGINT(20) UNSIGNED NOT NULL,
     race_id INT UNSIGNED NOT NULL,
+    race_game TINYTEXT NOT NULL,
     submission_datetime DATETIME NOT NULL,
     runner_name VARCHAR(32) NOT NULL,
     runner_time TIME,

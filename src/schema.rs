@@ -46,6 +46,7 @@ table! {
         submission_id -> Unsigned<Integer>,
         runner_id -> Unsigned<Bigint>,
         race_id -> Unsigned<Integer>,
+        race_game -> Tinytext,
         submission_datetime -> Datetime,
         runner_name -> Varchar,
         runner_time -> Nullable<Time>,

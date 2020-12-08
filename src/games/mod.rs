@@ -23,12 +23,13 @@ use uuid::Uuid;
 
 use crate::{
     discord::{channel_groups::ChannelGroup, servers::DiscordServer},
-    games::z3r::Z3rGame,
+    games::{other::OtherGame, z3r::Z3rGame},
     helpers::*,
     schema::*,
     BoxedError,
 };
 
+pub mod other;
 pub mod z3r;
 
 pub type BoxedGame = Box<dyn AsyncGame + Send + Sync>;
@@ -196,10 +197,10 @@ pub fn determine_game(args_str: &str) -> GameName {
     };
     match game_url.host_str() {
         Some(g) if g == "alttpr.com" => GameName::ALTTPR,
-        Some(g) if g == "samus.link" => GameName::SMZ3,
-        Some(g) if g == "ff4fe.com" => GameName::FF4FE,
-        Some(g) if g == "randommetroidsolver.pythonanywhere.com" => GameName::SMVARIA,
-        Some(g) if g == "sm.samus.link" => GameName::SMTotal,
+        // Some(g) if g == "samus.link" => GameName::SMZ3,
+        // Some(g) if g == "ff4fe.com" => GameName::FF4FE,
+        // Some(g) if g == "randommetroidsolver.pythonanywhere.com" => GameName::SMVARIA,
+        // Some(g) if g == "sm.samus.link" => GameName::SMTotal,
         Some(_) => GameName::Other,
         None => GameName::Other,
     }
@@ -209,7 +210,8 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
     let game_category = determine_game(args.rest());
     match game_category {
         GameName::ALTTPR => Ok(Box::new(Z3rGame::new_from_str(args.rest()).await?)),
-        _ => todo!(),
+        GameName::Other => Ok(Box::new(OtherGame::new_from_str(args.rest())?)),
+        _ => Err(anyhow!("Tried to start unknown game").into()),
     }
 }
 

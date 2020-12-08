@@ -7,8 +7,8 @@ use serde_json::{from_value, Value};
 use url::Url;
 
 use crate::{
-    discord::submissions::Submission,
-    games::{AsyncGame, GameName, RaceType},
+    discord::submissions::NewSubmission,
+    games::{AsyncGame, GameName},
     helpers::BoxedError,
 };
 
@@ -244,12 +244,13 @@ const fn code_map(value: u8) -> &'static str {
 }
 
 pub fn game_info<'a>(
-    submission: &'a mut Submission,
+    submission: &'a mut NewSubmission,
     msg: &Vec<&str>,
-) -> Result<&'a mut Submission, BoxedError> {
+) -> Result<&'a mut NewSubmission, BoxedError> {
     // for alttpr we just use the collection rate by default. we could also set one of
     // the optional values here if we wanted to take some other input. suppose we
     // wanted a bonk counter for example
+    // see the Display trait on Submissions for how this gets formatted on discord
 
     // but first we make sure there's enough elements in the vec to maybe use
     if msg.len() != 1 {

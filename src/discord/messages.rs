@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::{NaiveDate, NaiveDateTime};
-use diesel::prelude::*;
+use diesel::{dsl::count, prelude::*};
 use futures::{join, try_join};
 use serenity::{
     async_trait,
@@ -14,7 +14,7 @@ use crate::{
     discord::{
         channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
         servers::add_spoiler_role,
-        submissions::process_submission,
+        submissions::{process_submission, refresh_leaderboard, Submission},
     },
     games::{get_maybe_active_race, AsyncRaceData, BoxedGame},
     helpers::*,
@@ -35,7 +35,7 @@ pub struct BotMessage {
 }
 
 impl BotMessage {
-    fn from_serenity_msg(
+    pub fn from_serenity_msg(
         msg: &Message,
         server_id: u64,
         race_id: u32,
@@ -57,6 +57,7 @@ pub struct Handler;
 #[serenity::async_trait]
 impl EventHandler for Handler {
     // we may not need an event handler since our hooks grab everything we need
+    // but let's keep this around for now
     async fn message(&self, ctx: Context, msg: Message) {
         ()
     }
@@ -64,6 +65,7 @@ impl EventHandler for Handler {
 
 #[hook]
 pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
+    use crate::schema::submissions::columns::runner_name;
     // the only non-command messages we're interested in are time submissions from
     // non bot users
     if !in_submission_channel(&ctx, &msg).await
@@ -81,38 +83,49 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
         None => {
             // if there's no active race we still want to delete messages and keep this
             // channel tidy before returning
-            delete_sub_msg(&ctx, &msg).await;
+            let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
             return;
         }
     };
+
+    // check for duplicates
+    if Submission::belonging_to(&race)
+        .filter(runner_name.eq(&msg.author.name))
+        .first::<Submission>(&conn)
+        .ok()
+        .is_some()
+    {
+        info!("Duplicate submission from \"{}\"", &msg.author.name);
+        let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
+        return;
+    }
 
     // here we parse a possible time submission. If we get a good submission, insert
     // it into the database and we'll call a function to refresh the leaderboard from the
     // db below
     match process_submission(&ctx, &msg, &group, &race).await {
-        Ok(()) => (),
+        Ok(_) => (),
         Err(e) => {
-            // this is a complicated function that can fail in several ways. we may want
-            // to log warn or error depending. for now we will simply make duplicate
-            // logs if we want an error log
+            let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
             warn!("Error processing submission: {}", e);
             return;
         }
     };
-    match add_spoiler_role(&ctx, &msg, group.spoiler_role_id).await {
-        Ok(()) => (),
+
+    // if processing the submission fails we don't want to do these but otherwise
+    // they can probably be done concurrently
+    let role_fut = add_spoiler_role(&ctx, &msg, group.spoiler_role_id);
+    // refresh leaderboard from db
+    let lb_fut = refresh_leaderboard(&ctx, &group, &race);
+    let delete_fut = delete_sub_msg(&ctx, &msg);
+
+    match try_join!(role_fut, lb_fut, delete_fut) {
+        Ok(_) => (),
         Err(e) => {
-            warn!(
-                "Error giving spoiler role to user \"{}\": {}",
-                &msg.author.name, e
-            );
+            warn!("Error during post-submission {}", e);
             return;
         }
     };
-
-    // refresh leaderboard from db
-
-    delete_sub_msg(&ctx, &msg).await;
 
     ()
 }
@@ -163,7 +176,7 @@ pub async fn handle_new_race_messages(
     if game.has_url() {
         base_game_string.push_str(format!(" - {}", game.game_url().unwrap()).as_str());
     }
-    let lb_string = format!("Leaderboard for {}:\n", base_game_string);
+    let lb_string = format!("Leaderboard for {}\n", base_game_string);
 
     let sub_channel = ChannelId::from(group.submission);
     let lb_channel = ChannelId::from(group.leaderboard);
@@ -226,177 +239,10 @@ pub fn get_submission_msg_data(conn: &PooledConn, this_race_id: u32) -> Result<B
 }
 
 #[inline]
-async fn delete_sub_msg(ctx: &Context, msg: &Message) -> () {
-    let _ = msg
-        .delete(ctx)
-        .await
-        .map_err(|e| warn!("Error deleting message in submission channel: {}", e));
+async fn delete_sub_msg(ctx: &Context, msg: &Message) -> Result<(), BoxedError> {
+    let del = msg.delete(ctx).await;
+    match del {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow!("Error deleting submission message: {}", e).into()),
+    }
 }
-
-// #[serenity::async_trait]
-// impl EventHandler for Handler {
-//     fn message(&self, ctx: Context, msg: Message) {
-//         let data = ctx.data.read();
-//         let game_active: bool = *data
-//             .get::<ActiveGames>()
-//             .expect("No active game toggle set");
-//         let guild_id = match msg.guild_id {
-//             Some(guild_id) => guild_id,
-//             None => return,
-//         };
-//         let guild = match guild_id.to_partial_guild(&ctx.http) {
-//             Ok(guild) => guild,
-//             Err(e) => {
-//                 warn!("Couldn't get partial guild from REST API. ERROR: {}", e);
-//                 return;
-//             }
-//         };
-//
-//         let admin_role = match get_admin_role(&guild) {
-//             Ok(admin_role) => admin_role,
-//             Err(e) => {
-//                 warn!("Couldn't get admin role. Check if properly set in environment variables. ERROR: {}", e);
-//                 return;
-//             }
-//         };
-//
-//         if msg.author.id != ctx.cache.read().user.id
-//             && game_active
-//             && msg.channel_id.as_u64()
-//                 == match &env::var("SUBMISSION_CHANNEL_ID")
-//                     .expect("No submissions channel in the environment")
-//                     .parse::<u64>()
-//                 {
-//                     Ok(channel_u64) => channel_u64,
-//                     Err(e) => {
-//                         warn!("Error parsing channel id: {}", e);
-//                         return;
-//                     }
-//                 }
-//             && (msg
-//                 .member
-//                 .as_ref()
-//                 .unwrap()
-//                 .roles
-//                 .iter()
-//                 .find(|x| x.as_u64() == admin_role.as_u64())
-//                 == None
-//                 || [msg.content.as_str().bytes().nth(0).unwrap()] != "!".as_bytes())
-//         {
-//             info!(
-//                 "Received message from {}: \"{}\"",
-//                 &msg.author.name, &msg.content
-//             );
-//             match process_time_submission(&ctx, &msg) {
-//                 Ok(()) => (),
-//                 Err(e) => {
-//                     warn!("Error processing time submission: {}", e);
-//                 }
-//             };
-//
-//             msg.delete(&ctx)
-//                 .unwrap_or_else(|e| info!("Error deleting message: {}", e));
-//             match update_leaderboard(&ctx, *guild_id.as_u64()) {
-//                 Ok(()) => (),
-//                 Err(e) => {
-//                     warn!("Error updating leaderboard: {}", e);
-//                     return;
-//                 }
-//             };
-//         }
-//     }
-//
-//     fn ready(&self, _: Context, ready: Ready) {
-//         info!("{} is connected!", ready.user.name);
-//     }
-//
-//     fn resume(&self, _: Context, _: ResumedEvent) {
-//         info!("Resumed");
-//     }
-// }
-//
-// fn resize_leaderboard(
-//     ctx: &Context,
-//     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-//     guild_id: u64,
-//     leaderboard_channel: u64,
-//     new_posts: usize,
-// ) -> Result<Vec<Post>> {
-//     // we need one more post than we have to hold all submissions
-//     for _n in 0..new_posts {
-//         let new_message: Message =
-//             ChannelId::from(leaderboard_channel).say(&ctx.http, "Placeholder")?;
-//         create_post_entry(
-//             db_pool,
-//             *new_message.id.as_u64(),
-//             Utc::now().naive_utc(),
-//             guild_id,
-//             *new_message.channel_id.as_u64(),
-//         )?;
-//     }
-//     let leaderboard_posts: Vec<Post> = get_leaderboard_posts(&leaderboard_channel, db_pool)?;
-//
-//     Ok(leaderboard_posts)
-// }
-//
-// fn fill_leaderboard_update(
-//     ctx: &Context,
-//     db_pool: &Pool<ConnectionManager<MysqlConnection>>,
-//     guild_id: u64,
-//     leaderboard_string: String,
-//     mut leaderboard_posts: Vec<Post>,
-//     channel: u64,
-// ) -> Result<()> {
-//     let necessary_posts: usize = leaderboard_string.len() / 2000 + 1;
-//
-//     if necessary_posts > leaderboard_posts.len() {
-//         let new_posts: usize = necessary_posts - leaderboard_posts.len();
-//         leaderboard_posts = match resize_leaderboard(ctx, db_pool, guild_id, channel, new_posts) {
-//             Ok(posts) => posts,
-//             Err(e) => {
-//                 warn!("Error resizing leaderboard: {}", e);
-//                 return Ok(());
-//             }
-//         };
-//     }
-//
-//     // fill buffer then send the post until there's no more
-//     let mut post_buffer = String::with_capacity(2000);
-//     let mut post_iterator = leaderboard_posts.into_iter().peekable();
-//     let mut submission_iterator = leaderboard_string
-//         .split("\n")
-//         .collect::<Vec<&str>>()
-//         .into_iter()
-//         .peekable();
-//
-//     loop {
-//         if post_iterator.peek().is_none() {
-//             warn!("Error: Ran out of space for leaderboard");
-//             break;
-//         }
-//
-//         match submission_iterator.peek() {
-//             Some(line) => {
-//                 if line.len() + &post_buffer.len() <= 2000 {
-//                     post_buffer
-//                         .push_str(format!("\n{}", submission_iterator.next().unwrap()).as_str())
-//                 } else if line.len() + post_buffer.len() > 2000 {
-//                     let mut post = ctx
-//                         .http
-//                         .get_message(channel, post_iterator.next().unwrap().post_id)?;
-//                     post.edit(ctx, |x| x.content(&post_buffer))?;
-//                     post_buffer.clear();
-//                 }
-//             }
-//             None => {
-//                 let mut post = ctx
-//                     .http
-//                     .get_message(channel, post_iterator.next().unwrap().post_id)?;
-//                 post.edit(ctx, |x| x.content(post_buffer))?;
-//                 break;
-//             }
-//         };
-//     }
-//
-//     Ok(())
-// }
