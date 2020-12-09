@@ -116,7 +116,9 @@ pub async fn after_hook(
 #[group]
 #[commands(
     igtstart,
+    startigt,
     rtastart,
+    startrta,
     stop,
     addgroup,
     removegroup,
@@ -126,10 +128,13 @@ pub async fn after_hook(
     removemodrole,
     removeadminrole,
     changeentry,
-    refresh
+    refresh,
+    removetime
 )]
 struct General;
 
+// it's basically free to have two commands for starting each kind of race so why
+// not for the sake of ease-of-use
 #[command]
 #[bucket = "startrace"]
 pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
@@ -141,7 +146,25 @@ pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 
 #[command]
 #[bucket = "startrace"]
+pub async fn startigt(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    check_permissions(&ctx, &msg, Permission::Mod).await?;
+    start_race(&ctx, &msg, args, RaceType::IGT).await?;
+
+    Ok(())
+}
+
+#[command]
+#[bucket = "startrace"]
 pub async fn rtastart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    check_permissions(&ctx, &msg, Permission::Mod).await?;
+    start_race(&ctx, &msg, args, RaceType::RTA).await?;
+
+    Ok(())
+}
+
+#[command]
+#[bucket = "startrace"]
+pub async fn startrta(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::RTA).await?;
 
@@ -335,8 +358,43 @@ pub async fn removemodrole(ctx: &Context, msg: &Message, mut args: Args) -> Comm
 
 #[command]
 pub async fn removetime(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    use crate::schema::submissions::columns::*;
+    use crate::schema::submissions::dsl::*;
+
     check_permissions(&ctx, &msg, Permission::Mod).await?;
-    todo!();
+    if !in_submission_channel(&ctx, &msg).await {
+        return Err(anyhow!("removetime command must be run in a submission channel").into());
+    }
+    if args.len() != 1 {
+        return Err(anyhow!("removetime command must have a single argument (runner name)").into());
+    }
+    let maybe_runner: &str = args.rest().trim_end();
+
+    let group_fut = get_group(&ctx, &msg);
+    let conn_fut = get_connection(&ctx);
+    let (group, conn) = join!(group_fut, conn_fut);
+    let race = match get_maybe_active_race(&conn, &group) {
+        Some(r) => r,
+        None => return Err(anyhow!("Cannot run removetime command with no active race").into()),
+    };
+    match diesel::delete(submissions)
+        .filter(race_id.eq(race.race_id))
+        .filter(runner_name.eq(maybe_runner))
+        .execute(&conn)
+    {
+        Ok(_) => (),
+        Err(_) => {
+            return Err(anyhow!(
+                "Could not remove submission for \"{}\" in this race",
+                &maybe_runner
+            )
+            .into())
+        }
+    };
+
+    refresh_leaderboard(&ctx, &group, &race).await?;
+
+    Ok(())
 }
 
 #[command]
@@ -352,7 +410,7 @@ pub async fn refresh(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
         Some(r) => refresh_leaderboard(&ctx, &group, &r).await?,
-        None => return Err(anyhow!("Ran refresh command with no active race").into()),
+        None => return Err(anyhow!("Cannot run refresh command with no active race").into()),
     };
 
     Ok(())
