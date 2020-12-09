@@ -1,17 +1,10 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt,
-    io::Cursor,
-    str::from_utf8,
-    str::FromStr,
-};
+use std::{convert::TryFrom, fmt, io::Cursor, str::from_utf8, str::FromStr};
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
-use chrono::naive::{NaiveDate, NaiveTime};
+use chrono::naive::NaiveTime;
 use reqwest::get;
-use serde_json::{from_value, Value};
-use url::Url;
+use serde_json::Value;
 
 use crate::{
     discord::submissions::NewSubmission,
@@ -79,10 +72,6 @@ impl Z3rGame {
 }
 
 async fn get_patch(game_id: &str) -> Result<Value> {
-    let url_string: String = format!(
-        "https://s3.us-east-2.amazonaws.com/alttpr-patches/{}.json",
-        game_id
-    );
     let url = format!("{}{}.json", BASE_URL, game_id);
     let patch_json = get(&url).await?.json().await?;
 
@@ -229,8 +218,6 @@ impl AsyncGame for Z3rGame {
 
 #[inline]
 fn get_code(patch: &Value) -> Result<Vec<&'static str>> {
-    let mut code: Vec<&'static str> = Vec::with_capacity(5);
-
     // it's pretty safe to unwrap here unless the alttpr patch format
     // changes suddenly and dramatically
     let code: Vec<&'static str> = patch
@@ -337,7 +324,7 @@ impl SaveParser for Z3rSram {
         // .as_slice() exists but not stable yet
         let slice = &self.0[..];
         let mut cur = Cursor::new(slice);
-        let igt = Z3rStat::new_time(Some(&mut cur), 0x43Eu64);
+        let igt = Z3rTime::new_time(Some(&mut cur), 0x43Eu64);
         let time = NaiveTime::parse_from_str(&igt.to_string(), "%H:%M:%S")?;
 
         Ok(time)
@@ -352,12 +339,9 @@ impl SaveParser for Z3rSram {
     }
 }
 
-enum Z3rStat {
-    Number(u32),
-    Time(String),
-}
+struct Z3rTime(String);
 
-impl Z3rStat {
+impl Z3rTime {
     fn new_time<T: Into<u64>>(cur: Option<&mut Cursor<&[u8]>>, num: T) -> Self {
         let value: u32 = match cur {
             Some(cur) => {
@@ -374,16 +358,13 @@ impl Z3rStat {
 
         let time = format!("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
 
-        Z3rStat::Time(time)
+        Z3rTime(time)
     }
 }
 
-impl fmt::Display for Z3rStat {
+impl fmt::Display for Z3rTime {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Number(n) => write!(f, "{}", *n),
-            Self::Time(t) => write!(f, "{}", *t),
-        }
+        write!(f, "{}", self.0)
     }
 }
 

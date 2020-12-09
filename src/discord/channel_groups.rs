@@ -1,32 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryFrom,
     fmt,
     iter::FromIterator,
 };
 
 use anyhow::{anyhow, Result};
 use diesel::{
-    backend::Backend,
-    deserialize,
-    deserialize::{FromSql, FromSqlRow},
-    expression::AsExpression,
-    helper_types::AsExprOf,
-    mysql::Mysql,
-    prelude::*,
-    row::Row,
-    sql_types::Text,
+    backend::Backend, deserialize, deserialize::FromSql, expression::AsExpression,
+    helper_types::AsExprOf, prelude::*, sql_types::Text,
 };
-use serde::{Deserialize, Deserializer};
-use serenity::{
-    model::{
-        channel::Message,
-        guild::Guild,
-        id::{ChannelId, GuildId, RoleId},
-    },
-    prelude::*,
-};
-use uuid::Uuid;
+use serde::Deserialize;
+use serenity::{model::channel::Message, prelude::*};
 
 use crate::{discord::servers::DiscordServer, helpers::*, schema::channels};
 
@@ -62,8 +46,6 @@ impl ChannelGroup {
         ctx: &Context,
         yaml_bytes: &[u8],
     ) -> Result<Self, BoxedError> {
-        use serde_yaml;
-
         let yaml: ChannelGroupYaml = match serde_yaml::from_slice(yaml_bytes) {
             Ok(g) => g,
             Err(e) => return Err(Box::new(e) as BoxedError),
@@ -249,9 +231,7 @@ async fn validate_new_group(
 
 #[inline]
 pub fn get_groups(conn: &PooledConn) -> Result<HashMap<u64, ChannelGroup>> {
-    use crate::schema::channels::columns::*;
     use crate::schema::channels::dsl::*;
-    use diesel::dsl::count;
 
     let mut group_vec: Vec<ChannelGroup> = channels.load(conn)?;
     let mut group_map: HashMap<u64, ChannelGroup> = HashMap::with_capacity(group_vec.len() + 1);

@@ -1,9 +1,8 @@
 use anyhow::{anyhow, Result};
-use chrono::{NaiveDate, NaiveDateTime};
-use diesel::{dsl::count, prelude::*};
+use chrono::NaiveDateTime;
+use diesel::prelude::*;
 use futures::{join, try_join};
 use serenity::{
-    async_trait,
     framework::standard::macros::hook,
     model::{channel::Message, id::ChannelId},
     prelude::*,
@@ -58,7 +57,7 @@ pub struct Handler;
 impl EventHandler for Handler {
     // we may not need an event handler since our hooks grab everything we need
     // but let's keep this around for now
-    async fn message(&self, ctx: Context, msg: Message) {
+    async fn message(&self, _ctx: Context, _msg: Message) {
         ()
     }
 }
@@ -103,7 +102,7 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     // here we parse a possible time submission. If we get a good submission, insert
     // it into the database and we'll call a function to refresh the leaderboard from the
     // db below
-    match process_submission(&ctx, &msg, &group, &race).await {
+    match process_submission(&ctx, &msg, &race).await {
         Ok(_) => (),
         Err(e) => {
             let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
@@ -122,7 +121,7 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     match try_join!(role_fut, lb_fut, delete_fut) {
         Ok(_) => (),
         Err(e) => {
-            warn!("Error during post-submission {}", e);
+            warn!("Error during post-submission: {}", e);
             return;
         }
     };

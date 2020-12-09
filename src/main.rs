@@ -1,27 +1,12 @@
-#![allow(dead_code, unused_mut, unused_variables, unused_imports)]
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-};
+// #![allow(dead_code, unused_mut, unused_variables, unused_imports)]
+use std::env;
 
-use anyhow::Result;
 #[macro_use]
 extern crate diesel;
-use diesel::{
-    mysql::MysqlConnection,
-    r2d2::{ConnectionManager, Pool, PooledConnection},
-};
 use dotenv::dotenv;
 #[macro_use]
 extern crate log;
-use reqwest;
-use serenity::{
-    framework::standard::StandardFramework,
-    http::Http,
-    model::id::{ChannelId, GuildId},
-    prelude::*,
-};
-use tokio::prelude::*;
+use serenity::{framework::standard::StandardFramework, prelude::*};
 
 pub mod discord;
 pub mod games;
@@ -30,7 +15,7 @@ pub mod schema;
 
 use crate::{
     discord::{
-        channel_groups::{get_groups, get_submission_channels, ChannelGroup},
+        channel_groups::{get_groups, get_submission_channels},
         commands::{after_hook, before_hook, GENERAL_GROUP},
         messages::{normal_message_hook, Handler},
         servers::get_servers,
@@ -45,17 +30,16 @@ async fn main() -> anyhow::Result<()> {
 
     let token = env::var("MURAHDAHLA_DISCORD_TOKEN")
         .expect("Expected MURAHDAHLA_DISCORD_TOKEN in the environment.");
-    let database_url = env::var("MURAHDAHLA_DATABASE_URL")
-        .expect("Expected MURAHDAHLA_DATABASE_URL in the environment");
+    let database_url = env::var("DATABASE_URL").expect("Expected DATABASE_URL in the environment");
     let framework = StandardFramework::new()
         .configure(|c| c.prefix("!").allow_dm(false))
         .group(&GENERAL_GROUP)
         .before(before_hook)
         .after(after_hook)
         .normal_message(normal_message_hook)
-        // race starting commands may make calls to 3rd party services so let's put a nominal
-        // rate limit on them
-        .bucket("startrace", |b| b.delay(10))
+        // we probably want a better rate limiting solution but let's put a nominal limit
+        // on it for now since startrace will be making requests
+        .bucket("startrace", |b| b.delay(2))
         .await;
 
     let mut client = Client::builder(&token)

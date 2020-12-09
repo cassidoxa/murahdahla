@@ -1,7 +1,7 @@
-use std::{collections::HashSet, convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use chrono::{offset::Utc, NaiveDateTime, NaiveTime};
+use chrono::NaiveTime;
 use diesel::{insert_into, prelude::*};
 use futures::{join, try_join};
 use serenity::{
@@ -11,14 +11,10 @@ use serenity::{
     },
     model::{
         channel::{Message, ReactionType},
-        event::ResumedEvent,
-        gateway::Ready,
-        guild::PartialGuild,
-        id::{ChannelId, RoleId},
+        id::ChannelId,
     },
     prelude::*,
 };
-use uuid::Uuid;
 
 use crate::{
     discord::{
@@ -127,7 +123,8 @@ pub async fn after_hook(
     setadminrole,
     removemodrole,
     removeadminrole,
-    changeentry,
+    settime,
+    setcollection,
     refresh,
     removetime
 )]
@@ -137,7 +134,7 @@ struct General;
 // not for the sake of ease-of-use
 #[command]
 #[bucket = "startrace"]
-pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn igtstart(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::IGT).await?;
 
@@ -146,7 +143,7 @@ pub async fn igtstart(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 
 #[command]
 #[bucket = "startrace"]
-pub async fn startigt(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn startigt(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::IGT).await?;
 
@@ -155,7 +152,7 @@ pub async fn startigt(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 
 #[command]
 #[bucket = "startrace"]
-pub async fn rtastart(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn rtastart(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::RTA).await?;
 
@@ -164,7 +161,7 @@ pub async fn rtastart(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 
 #[command]
 #[bucket = "startrace"]
-pub async fn startrta(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn startrta(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     start_race(&ctx, &msg, args, RaceType::RTA).await?;
 
@@ -172,10 +169,10 @@ pub async fn startrta(ctx: &Context, msg: &Message, mut args: Args) -> CommandRe
 }
 
 #[command]
-pub async fn stop(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     // this must run in a submission channel because we need a group and a maybe-race
     if !in_submission_channel(&ctx, &msg).await {
-        return Err(anyhow!("User \"{}\" ran stop command outside of a submission channel").into());
+        return Ok(());
     }
     let group_fut = get_group(&ctx, &msg);
     let conn_fut = get_connection(&ctx);
@@ -184,23 +181,15 @@ pub async fn stop(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
         Some(r) => stop_race(&ctx, &r, &group).await?,
-        None => {
-            return Err(anyhow!(
-                "User \"{}\" ran stop command in a channel with no active race",
-                &msg.author.name
-            )
-            .into())
-        }
+        None => return Ok(()),
     };
 
     Ok(())
 }
 
 #[command]
-pub async fn addgroup(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    use crate::schema::channels::columns::*;
+pub async fn addgroup(ctx: &Context, msg: &Message) -> CommandResult {
     use crate::schema::channels::dsl::*;
-    use diesel::dsl::count;
 
     check_permissions(&ctx, &msg, Permission::Admin).await?;
     match msg.attachments.len() {
@@ -263,13 +252,13 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
 
     {
         let mut data = ctx.data.write().await;
-        let mut group_map = data
+        let group_map = data
             .get_mut::<GroupContainer>()
             .expect("No group container in share map");
         group_map
             .remove(&group_submission)
             .ok_or(anyhow!("Error removing group from share map"))?;
-        let mut submission_set = data
+        let submission_set = data
             .get_mut::<SubmissionSet>()
             .expect("No submission set in share map");
         submission_set.remove(&group_submission);
@@ -282,12 +271,8 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
 }
 
 #[command]
-pub async fn listgroups(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    use crate::schema::channels::columns::*;
-    use crate::schema::channels::dsl::*;
-
+pub async fn listgroups(ctx: &Context, msg: &Message) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
-    let conn = get_connection(&ctx).await;
     let this_server_id = *msg.guild_id.unwrap().as_u64();
     let group_names = {
         let data = ctx.data.read().await;
@@ -311,7 +296,7 @@ pub async fn listgroups(ctx: &Context, msg: &Message, mut args: Args) -> Command
 }
 
 #[command]
-pub async fn setadminrole(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn setadminrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
     set_role_from_command(&ctx, &msg, args, Permission::Admin, ServerRoleAction::Add).await?;
 
@@ -319,7 +304,7 @@ pub async fn setadminrole(ctx: &Context, msg: &Message, mut args: Args) -> Comma
 }
 
 #[command]
-pub async fn setmodrole(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn setmodrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
     set_role_from_command(&ctx, &msg, args, Permission::Mod, ServerRoleAction::Add).await?;
 
@@ -327,7 +312,7 @@ pub async fn setmodrole(ctx: &Context, msg: &Message, mut args: Args) -> Command
 }
 
 #[command]
-pub async fn removeadminrole(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn removeadminrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
     set_role_from_command(
         &ctx,
@@ -342,7 +327,7 @@ pub async fn removeadminrole(ctx: &Context, msg: &Message, mut args: Args) -> Co
 }
 
 #[command]
-pub async fn removemodrole(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn removemodrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
     set_role_from_command(
         &ctx,
@@ -357,13 +342,13 @@ pub async fn removemodrole(ctx: &Context, msg: &Message, mut args: Args) -> Comm
 }
 
 #[command]
-pub async fn removetime(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     use crate::schema::submissions::columns::*;
     use crate::schema::submissions::dsl::*;
 
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     if !in_submission_channel(&ctx, &msg).await {
-        return Err(anyhow!("removetime command must be run in a submission channel").into());
+        return Ok(());
     }
     if args.len() != 1 {
         return Err(anyhow!("removetime command must have a single argument (runner name)").into());
@@ -375,7 +360,7 @@ pub async fn removetime(ctx: &Context, msg: &Message, mut args: Args) -> Command
     let (group, conn) = join!(group_fut, conn_fut);
     let race = match get_maybe_active_race(&conn, &group) {
         Some(r) => r,
-        None => return Err(anyhow!("Cannot run removetime command with no active race").into()),
+        None => return Ok(()),
     };
     match diesel::delete(submissions)
         .filter(race_id.eq(race.race_id))
@@ -391,17 +376,24 @@ pub async fn removetime(ctx: &Context, msg: &Message, mut args: Args) -> Command
             .into())
         }
     };
-
+    let member = msg.member(&ctx)?;
+    match &member.remove_role(&ctx, group.spoiler_role_id).await {
+        Ok(()) => (),
+        Err(e) => warn!(
+            "Error removing role for user \"{}\": {}",
+            &msg.author.name, e
+        ),
+    };
     refresh_leaderboard(&ctx, &group, &race).await?;
 
     Ok(())
 }
 
 #[command]
-pub async fn refresh(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Mod).await?;
     if !in_submission_channel(&ctx, &msg).await {
-        return Err(anyhow!("Refresh command must be run in a submissions channel").into());
+        return Ok(());
     }
     let group_fut = get_group(&ctx, &msg);
     let conn_fut = get_connection(&ctx);
@@ -410,22 +402,111 @@ pub async fn refresh(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
         Some(r) => refresh_leaderboard(&ctx, &group, &r).await?,
-        None => return Err(anyhow!("Cannot run refresh command with no active race").into()),
+        None => Ok(()),
     };
 
     Ok(())
 }
 
 #[command]
-pub async fn changeentry(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    use crate::schema::submissions::columns::*;
+    // we could and should write a command that will change an entire submission based on
+    // game, especially if we get games were people will be using any optional, non
+    // collection rate fields etc. but for now a command that simply changes the time
+    // is sufficient.
     check_permissions(&ctx, &msg, Permission::Mod).await?;
-    todo!();
+    if !in_submission_channel(&ctx, &msg).await {
+        return Ok(());
+    }
+
+    let group_fut = get_group(&ctx, &msg);
+    let conn_fut = get_connection(&ctx);
+    let (group, conn) = join!(group_fut, conn_fut);
+    let race = match get_maybe_active_race(&conn, &group) {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    if args.len() != 2 {
+        return Err(
+            anyhow!("settime command requires two arguments (runner name and new time)").into(),
+        );
+    }
+    //
+    let maybe_runner = args.single::<String>()?;
+    let maybe_time = args.single::<String>()?;
+    let new_time = NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S")?;
+    let submission: Submission = match Submission::belonging_to(&race)
+        .filter(runner_name.eq(&maybe_runner))
+        .first(&conn)
+    {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(anyhow!(
+                "Could not find submission for runner \"{}\" in this race",
+                &maybe_runner
+            )
+            .into())
+        }
+    };
+    diesel::update(&submission)
+        .set(runner_time.eq(new_time))
+        .execute(&conn)?;
+    refresh_leaderboard(&ctx, &group, &race).await?;
+
+    Ok(())
+}
+
+#[command]
+pub async fn setcollection(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    use crate::schema::submissions::columns::*;
+    check_permissions(&ctx, &msg, Permission::Mod).await?;
+    if !in_submission_channel(&ctx, &msg).await {
+        return Ok(());
+    }
+
+    let group_fut = get_group(&ctx, &msg);
+    let conn_fut = get_connection(&ctx);
+    let (group, conn) = join!(group_fut, conn_fut);
+    let race = match get_maybe_active_race(&conn, &group) {
+        Some(r) => r,
+        None => Ok(()),
+    };
+    if args.len() != 2 {
+        return Err(anyhow!(
+            "setcollection command requires two arguments (runner name and new collection rate)"
+        )
+        .into());
+    }
+    //
+    let maybe_runner = args.single::<String>()?;
+    let maybe_collection = args.single::<String>()?;
+    let new_collection = u16::from_str(&maybe_collection)?;
+    let submission: Submission = match Submission::belonging_to(&race)
+        .filter(runner_name.eq(&maybe_runner))
+        .first(&conn)
+    {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(anyhow!(
+                "Could not find submission for runner \"{}\" in this race",
+                &maybe_runner
+            )
+            .into())
+        }
+    };
+    diesel::update(&submission)
+        .set(runner_collection.eq(new_collection))
+        .execute(&conn)?;
+    refresh_leaderboard(&ctx, &group, &race).await?;
+
+    Ok(())
 }
 
 async fn set_role_from_command(
     ctx: &Context,
     msg: &Message,
-    mut args: Args,
+    args: Args,
     role_type: Permission,
     role_action: ServerRoleAction,
 ) -> Result<(), BoxedError> {
@@ -454,7 +535,7 @@ async fn set_role_from_command(
     };
     {
         let mut data = ctx.data.write().await;
-        let mut server = data
+        let server = data
             .get_mut::<ServerContainer>()
             .expect("No server container in share map")
             .get_mut(&this_server_id)
@@ -470,7 +551,7 @@ async fn set_role_from_command(
 async fn start_race(
     ctx: &Context,
     msg: &Message,
-    mut args: Args,
+    args: Args,
     this_race_type: RaceType,
 ) -> Result<(), BoxedError> {
     use crate::schema::async_races::columns::*;
@@ -478,7 +559,7 @@ async fn start_race(
 
     // this command must be run in a submission channel
     if !in_submission_channel(&ctx, &msg).await {
-        return Err(anyhow!("Games must be started in a submissions channel").into());
+        return Ok(());
     }
     let group_fut = get_group(&ctx, &msg);
     let conn_fut = get_connection(&ctx);
@@ -514,7 +595,6 @@ async fn start_race(
 
 async fn stop_race(ctx: &Context, race: &AsyncRaceData, group: &ChannelGroup) -> Result<()> {
     use crate::schema::async_races;
-    use crate::schema::messages;
     let conn = get_connection(&ctx).await;
     diesel::update(race)
         .set(async_races::race_active.eq(false))
@@ -579,7 +659,6 @@ async fn remove_spoiler_roles(
     // collect the user ids of everyone with a submission in this race
     // so we can use them to remove the spoiler role when the race has stopped
     use crate::schema::submissions::columns::*;
-    use crate::schema::submissions::dsl::*;
 
     let conn = get_connection(&ctx).await;
     let user_ids = Submission::belonging_to(race)
@@ -595,7 +674,7 @@ async fn remove_spoiler_roles(
         };
         match &member.remove_role(&ctx, group.spoiler_role_id).await {
             Ok(()) => (),
-            Err(e) => warn!("Error removing role: {}", e),
+            Err(e) => warn!("Error removing role for user id \"{}\": {}", id, e),
         };
     }
 

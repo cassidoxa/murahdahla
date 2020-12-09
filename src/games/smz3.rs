@@ -1,16 +1,10 @@
-use std::{
-    convert::TryFrom,
-    default::Default,
-    str::{from_utf8, FromStr},
-};
+use std::{convert::TryFrom, default::Default, str::FromStr};
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use base64;
-use chrono::naive::NaiveDate;
 use reqwest::get;
 use serde::Deserialize;
-use serde_json::{from_slice, from_str, from_value, Value};
-use url::Url;
+use serde_json::{from_str, Value};
 use uuid::Uuid;
 
 use crate::{
@@ -149,7 +143,7 @@ impl AsyncGame for SMZ3Game {
             .as_str()
             .ok_or::<BoxedError>(anyhow!("Error parsing goal").into())?;
 
-        let mut game_string: String = format!("{} {} {} ({}) ", sm_logic, morph, sword, code);
+        let game_string: String = format!("{} {} {} ({}) ", sm_logic, morph, sword, code);
 
         Ok(game_string)
     }

@@ -1,14 +1,11 @@
 use std::{default::Default, fmt};
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use chrono::{Duration, NaiveDateTime, NaiveTime, Utc};
 use diesel::prelude::*;
 use serenity::{
     client::Context,
-    model::{
-        channel::Message,
-        id::{ChannelId, RoleId},
-    },
+    model::{channel::Message, id::ChannelId},
 };
 
 use crate::{
@@ -194,10 +191,8 @@ impl Default for NewSubmission {
 pub async fn process_submission(
     ctx: &Context,
     msg: &Message,
-    group: &ChannelGroup,
     race: &AsyncRaceData,
 ) -> Result<(), BoxedError> {
-    use crate::schema::submissions::columns::*;
     use crate::schema::submissions::dsl::*;
 
     // how we process this depends on game, IGT or RTA, and whether or not we have
@@ -220,7 +215,7 @@ pub async fn process_submission(
     // the length check here should short circuit so we don't have to worry
     // about panicking if there's no text
     if maybe_submission_text.len() >= 1 && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
-        insert_forfeit(&ctx, &msg, &group, &race).await?;
+        insert_forfeit(&ctx, &msg, &race).await?;
         info!(
             "Successfully entered submission for user \"{}\"",
             &msg.author.name
@@ -232,7 +227,7 @@ pub async fn process_submission(
     if igt_check {
         // this can fail so if someone attaches a save let's assume they're not also
         // writing their time etc and return if it does
-        insert_save(&ctx, &msg, &group, &race).await?;
+        insert_save(&ctx, &msg, &race).await?;
         info!(
             "Successfully entered submission for user \"{}\"",
             &msg.author.name
@@ -260,7 +255,7 @@ pub async fn process_submission(
         }
     };
 
-    let mut submission = NewSubmission::default()
+    let submission = NewSubmission::default()
         .set_runner_id(msg.author.id)
         .set_race_id(race.race_id)
         .name(&msg.author.name)
@@ -273,13 +268,7 @@ pub async fn process_submission(
     Ok(())
 }
 
-async fn insert_forfeit(
-    ctx: &Context,
-    msg: &Message,
-    group: &ChannelGroup,
-    race: &AsyncRaceData,
-) -> Result<()> {
-    use crate::schema::submissions::columns::*;
+async fn insert_forfeit(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Result<()> {
     use crate::schema::submissions::dsl::*;
 
     let submission = NewSubmission {
@@ -302,13 +291,7 @@ async fn insert_forfeit(
     Ok(())
 }
 
-async fn insert_save(
-    ctx: &Context,
-    msg: &Message,
-    group: &ChannelGroup,
-    race: &AsyncRaceData,
-) -> Result<(), BoxedError> {
-    use crate::schema::submissions::columns::*;
+async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Result<(), BoxedError> {
     use crate::schema::submissions::dsl::*;
 
     // we've already checked that the msg has exactly one attachment
@@ -328,7 +311,7 @@ async fn insert_save(
         None => (),
     };
 
-    let mut submission = NewSubmission::default()
+    let submission = NewSubmission::default()
         .set_runner_id(msg.author.id)
         .set_race_id(race.race_id)
         .name(&msg.author.name)
@@ -462,7 +445,6 @@ async fn resize_leaderboard<'a>(
     group: &ChannelGroup,
     lb_posts: &'a mut Vec<BotMessage>,
 ) -> Result<&'a mut Vec<BotMessage>, BoxedError> {
-    use crate::schema::messages::columns::*;
     use crate::schema::messages::dsl::*;
     // we only ever need one more post than we have to hold all submissions
     let conn = get_connection(&ctx).await;

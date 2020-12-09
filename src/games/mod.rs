@@ -1,28 +1,16 @@
-use std::{
-    convert::{From, TryFrom},
-    error::Error,
-    fmt,
-};
+use std::fmt;
 
 use anyhow::{anyhow, Result};
 use chrono::{offset::Utc, NaiveDate, NaiveTime};
 use diesel::{
-    backend::Backend,
-    deserialize,
-    deserialize::{FromSql, FromSqlRow},
-    expression::AsExpression,
-    helper_types::AsExprOf,
-    mysql::Mysql,
-    prelude::*,
-    row::Row,
-    sql_types::Text,
+    backend::Backend, deserialize, deserialize::FromSql, expression::AsExpression,
+    helper_types::AsExprOf, prelude::*, sql_types::Text,
 };
 use serenity::framework::standard::Args;
 use url::Url;
-use uuid::Uuid;
 
 use crate::{
-    discord::{channel_groups::ChannelGroup, servers::DiscordServer},
+    discord::channel_groups::ChannelGroup,
     games::{
         other::OtherGame,
         smz3::SMZ3Game,
@@ -231,7 +219,6 @@ pub fn get_save_boxed(maybe_save: &Vec<u8>, game: GameName) -> Result<BoxedSave,
 
 pub fn get_maybe_active_race(conn: &PooledConn, group: &ChannelGroup) -> Option<AsyncRaceData> {
     use crate::schema::async_races::columns::*;
-    use crate::schema::async_races::dsl::*;
 
     AsyncRaceData::belonging_to(group)
         .filter(race_active.eq(true))

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use diesel::prelude::*;
@@ -7,7 +7,7 @@ use serenity::{
     model::{
         channel::Message,
         guild::Guild,
-        id::{ChannelId, GuildId, RoleId},
+        id::{GuildId, RoleId},
     },
     prelude::*,
 };
