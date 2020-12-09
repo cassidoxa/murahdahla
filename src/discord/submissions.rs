@@ -13,7 +13,7 @@ use crate::{
         channel_groups::{ChannelGroup, ChannelType},
         messages::BotMessage,
     },
-    games::{get_save_boxed, smz3, z3r, AsyncRaceData, GameName, RaceType},
+    games::{get_save_boxed, smtotal, smz3, z3r, AsyncRaceData, GameName, RaceType},
     helpers::*,
     schema::*,
 };
@@ -62,14 +62,14 @@ impl fmt::Display for Submission {
             GameName::FF4FE => write!(f, "{} - {}", self.runner_name, self.runner_time.unwrap()),
             GameName::SMVARIA => write!(
                 f,
-                "({} - {} - {}%)",
+                "{} - {} - {}%",
                 self.runner_name,
                 self.runner_time.unwrap(),
                 self.runner_collection.unwrap()
             ),
             GameName::SMTotal => write!(
                 f,
-                "({} - {} - {}%)",
+                "{} - {} - {}%",
                 self.runner_name,
                 self.runner_time.unwrap(),
                 self.runner_collection.unwrap()
@@ -165,6 +165,7 @@ impl NewSubmission {
         match game {
             GameName::ALTTPR => Ok(z3r::game_info(self, submission_msg)?.clone()),
             GameName::SMZ3 => Ok(smz3::game_info(self, submission_msg)?.clone()),
+            GameName::SMTotal => Ok(smtotal::game_info(self, submission_msg)?.clone()),
             GameName::Other => Ok(self.clone()),
             _ => Err(anyhow!("Game not yet implemented").into()),
         }
@@ -243,13 +244,14 @@ pub async fn process_submission(
     // remove backslashes because *some servers* use numbers as emotes
     // we are also REMOVING the first element of the vector here
     let maybe_time: &str = &maybe_submission_text.remove(0).replace("\\", "");
-    let time = match NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S") {
+    let time = match parse_variable_time(&maybe_time) {
         Ok(t) => t,
-        Err(_) => {
+        Err(e) => {
             return Err(anyhow!(
-                "Processing submission: Malformed time from user \"{}\": {}",
+                "Processing submission: Malformed time from user \"{}\": {} - {}",
                 &msg.author.name,
-                &maybe_time
+                &maybe_time,
+                e
             )
             .into());
         }
@@ -464,4 +466,29 @@ async fn resize_leaderboard<'a>(
     lb_posts.push(new_msg_data);
 
     Ok(lb_posts)
+}
+
+pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
+    // technically NaiveTime represents a time of day but it works for our purposes
+    let mut time_string = String::with_capacity(9);
+    let split_time = maybe_time.clone().split(":");
+    match split_time.count() {
+        0 => return Err(anyhow!("Empty submission time")),
+        1 => {
+            time_string.push_str("00:00:");
+            time_string.push_str(maybe_time);
+        }
+        2 => {
+            time_string.push_str("00:");
+            time_string.push_str(maybe_time);
+        }
+        3 => {
+            time_string.push_str(maybe_time);
+        }
+        _ => return Err(anyhow!("Tried to parse malformed time")),
+    };
+    dbg!(&time_string);
+    let time = NaiveTime::parse_from_str(&time_string, "%H:%M:%S").map_err(|e| anyhow!("{}", e));
+
+    time
 }

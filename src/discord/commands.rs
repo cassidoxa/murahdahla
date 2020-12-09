@@ -1,7 +1,6 @@
 use std::{convert::TryFrom, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use chrono::NaiveTime;
 use diesel::{insert_into, prelude::*};
 use futures::{join, try_join};
 use serenity::{
@@ -24,7 +23,7 @@ use crate::{
             handle_new_race_messages, BotMessage,
         },
         servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
-        submissions::{refresh_leaderboard, Submission},
+        submissions::{parse_variable_time, refresh_leaderboard, Submission},
     },
     games::{
         get_game_boxed, get_maybe_active_race, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType,
@@ -436,7 +435,7 @@ pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     //
     let maybe_runner = args.single::<String>()?;
     let maybe_time = args.single::<String>()?;
-    let new_time = NaiveTime::parse_from_str(&maybe_time, "%H:%M:%S")?;
+    let new_time = parse_variable_time(&maybe_time)?;
     let submission: Submission = match Submission::belonging_to(&race)
         .filter(runner_name.eq(&maybe_runner))
         .first(&conn)

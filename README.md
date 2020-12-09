@@ -109,11 +109,12 @@ with another start command.
 
 # Supported Games and Submitting Times
 
-Currently the bot supports ALTTPR (alttpr.com ) and SMZ3 (samus.link) permalinks. This
-means that if you start a race with a permalink from one of these sites, the bot will
-gather some information about the game to display in the submission channel and on the
-leaderboard. You can pass other URLs or information to the start commands and those
-will be displayed as provided as well, but the game will be listed as "Other."
+Currently the bot supports ALTTPR (alttpr.com ), SMZ3 (samus.link), and SM (Total's randomizer
+at sm.samus.link) permalinks. This means that if you start a race with a permalink
+from one of these sites, the bot will gather some information about the game to display
+in the submission channel and on the leaderboard. You can pass other URLs or information
+to the start commands and those will be displayed as provided as well, but the game will
+be listed as "Other."
 
 Subissions will always have a time and may require a collection rate depending on game.
 If you're playing ALTTPR, for example, the bot requires a submission in the format
