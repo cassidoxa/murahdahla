@@ -107,6 +107,24 @@ When a race is stopped, the leaderboard moves from the leaderboard channel to th
 channel. A race can be stopped with the `!stop` command or simply by starting a new race
 with another start command.
 
+# Supported Games and Submitting Times
+
+Currently the bot supports ALTTPR (alttpr.com ) and SMZ3 (samus.link) permalinks. This
+means that if you start a race with a permalink from one of these sites, the bot will
+gather some information about the game to display in the submission channel and on the
+leaderboard. You can pass other URLs or information to the start commands and those
+will be displayed as provided as well, but the game will be listed as "Other."
+
+Subissions will always have a time and may require a collection rate depending on game.
+If you're playing ALTTPR, for example, the bot requires a submission in the format
+"1:45:12 182" or it will not accept it.
+
+When using in-game time, the bot may be able to get information from a save file. Right
+now it mostly supports SNES randomizers so this will be an SRAM file with the extenstion
+.srm. Currently the bot only supports reading SRAM for ALTTPR, so if someone has the
+.srm file for a completed ALTTPR game, they can upload it into the submission channel
+and it will be treated the same as if they had entered a text submission.
+
 # Bot Commands
 
 ## Admin Commands
