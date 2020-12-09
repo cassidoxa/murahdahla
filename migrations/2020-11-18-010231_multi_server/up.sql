@@ -50,16 +50,6 @@ CREATE TABLE messages(
         ON DELETE CASCADE
 );
 
--- CREATE TABLE user_permissions(
---     permissions_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
---     user_id BIGINT(20) UNSIGNED,
---     server_id BIGINT(20) UNSIGNED NOT NULL,
---     permissions TINYINT(3) UNSIGNED NOT NULL,
---     FOREIGN KEY (server_id)
---         REFERENCES servers(server_id)
---         ON DELETE CASCADE
--- );
-
 CREATE TABLE submissions(
     submission_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     runner_id BIGINT(20) UNSIGNED NOT NULL,

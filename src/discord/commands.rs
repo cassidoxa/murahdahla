@@ -171,6 +171,7 @@ pub async fn startrta(ctx: &Context, msg: &Message, args: Args) -> CommandResult
 #[command]
 pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     // this must run in a submission channel because we need a group and a maybe-race
+    check_permissions(&ctx, &msg, Permission::Mod).await?;
     if !in_submission_channel(&ctx, &msg).await {
         return Ok(());
     }
@@ -306,7 +307,7 @@ pub async fn setadminrole(ctx: &Context, msg: &Message, args: Args) -> CommandRe
 #[command]
 pub async fn setmodrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     check_permissions(&ctx, &msg, Permission::Admin).await?;
-    set_role_from_command(&ctx, &msg, args, Permission::Mod, ServerRoleAction::Add).await?;
+    set_role_from_command(&ctx, &msg, args, Permission::Admin, ServerRoleAction::Add).await?;
 
     Ok(())
 }
@@ -376,7 +377,7 @@ pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResu
             .into())
         }
     };
-    let member = msg.member(&ctx)?;
+    let mut member = msg.member(&ctx).await?;
     match &member.remove_role(&ctx, group.spoiler_role_id).await {
         Ok(()) => (),
         Err(e) => warn!(
@@ -402,7 +403,7 @@ pub async fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
         Some(r) => refresh_leaderboard(&ctx, &group, &r).await?,
-        None => Ok(()),
+        None => return Ok(()),
     };
 
     Ok(())
@@ -470,7 +471,7 @@ pub async fn setcollection(ctx: &Context, msg: &Message, mut args: Args) -> Comm
     let (group, conn) = join!(group_fut, conn_fut);
     let race = match get_maybe_active_race(&conn, &group) {
         Some(r) => r,
-        None => Ok(()),
+        None => return Ok(()),
     };
     if args.len() != 2 {
         return Err(anyhow!(

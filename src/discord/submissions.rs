@@ -391,12 +391,12 @@ pub async fn refresh_leaderboard(
 async fn fill_leaderboard(
     ctx: &Context,
     group: &ChannelGroup,
-    lb_posts_data: &mut Vec<BotMessage>,
+    mut lb_posts_data: &mut Vec<BotMessage>,
     lb_string: &String,
 ) -> Result<(), BoxedError> {
     let necessary_posts: usize = lb_string.len() / 2000 + 1;
     if necessary_posts > lb_posts_data.len() {
-        resize_leaderboard(&ctx, &group, lb_posts_data).await?;
+        lb_posts_data = resize_leaderboard(&ctx, &group, lb_posts_data).await?;
     }
     // fill buffer then send the post until there's no more
     let mut post_buffer = String::with_capacity(2000);

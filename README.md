@@ -1,69 +1,159 @@
 # Overview
 
-Murahdahla is a bot that administrates asynchronous [ALttPR](https://alttpr.com) races
-based on the [serenity](https://github.com/serenity-rs/serenity) Rust library.
+Murahdahla is a bot that administrates asynchronous races, mostly designed around
+randomizers, based on the [serenity](https://github.com/serenity-rs/serenity) Rust crate.
+This bot was inspired by/a clone of the seed-of-the-week bot written by Neerm for the
+FF4 Free Enterprise community.
+
+# Requirements
+
+Setting up and running this bot requires some familiarity with linux, MySQL, Cargo, 
+and some basic system administration skills. It may work on other unix-like operating
+systems as well. Building and running on Windows is probably possible but not
+currently supported. There are some difficulties related to compiling the
+diesel-cli tool on Windows.
+
+## 1. Minimum Rust version: 1.48
+
+Building requires the Rust compiler and Cargo. You can find these in your distro's repo or
+they can be installed via [rustup](https://rustup.rs) (the preferred method.)
+
+## 2. MySQL
+
+The bot uses a MySQL database on the backend
+
+## 3. libmysqlclient
+
+The diesel-cli tool requires this library to build. It should be available in your distro's
+repository. (Note: I'm 80% sure this is the correct library. You may need `libmysqlclient-dev`.
+If this is not the case or another library is required please let me know.)
+
+## 4. diesel-cli
+
+Once you have Cargo you can install this by running `cargo install diesel_cli --no-default-features --features "mysql"`
 
 # Setup
 
-Building requires the Rust compiler and Cargo. You can find these in your distro's repo or
-they can be installed via [rustup](https://rustup.rs) (the preferred method.) 
-
 ## 1. Clone this repo
 
-## 2. Setting up environment variables
+## 2. Copy the .env example
 
-Copy and rename `.env.example` to `.env`. 
+Copy and rename `.env.example` to `.env` by running `cp .env.example .env`.
 
 ## 3. Diesel Setup
 
-Murahdahla requires a MySQL database and uses the [Diesel ORM](https://github.com/diesel-rs/diesel)
-to manage the database. First install `diesel-cli` by running
-
-`cargo install diesel_cli --no-default-features --features "mysql"`
-
-Put the database URL in your `.env` file. Then run `diesel setup`. If the database needs
-to be migrated following an update, you must run `diesel migration run` after pulling the update.
-Refer to the MySQL documentation for instructions on setting up a database.
+Put the database URL in your `.env` file in the DATABASE\_URL environment variable. Then
+run `diesel setup`. If the database needs to be migrated following an update,
+run `diesel migration run` or `diesel database reset` (note: this will drop all existing
+tables) after pulling the update. I will do my best to note when a migration is required in
+release notes or contact bot operators ahead of time. Refer to the MySQL documentation for
+instructions on setting up and managing a database.
 
 ## 4. Compile
 
 You can compile this program by running `cargo build --release` from the main directory. This
-pulls in all the dependencies from crates.io and requires an internet connection. After compiling the binary
-will be located in `murahdahla/target/release`.
+pulls in all the dependencies from crates.io and requires an internet connection. After
+compiling, the binary will be located in `murahdahla/target/release`. The program must be
+run from a working directory containing the .env file with the proper variables.
 
-# Running the Bot and Managing Permissions
+# Managing Permissions
 
 Please see the Discord documentation on [bots and apps](https://discordapp.com/developers/docs/intro#bots-and-apps).
 Also see instructions for adding a bot you're hosting yourself [here.](https://github.com/jagrosh/MusicBot/wiki/Adding-Your-Bot-To-Your-Server)
 Running this bot requires creating an application and a bot user. The bot requires the following
-permissions: Manage Roles, Send Messages, Manage Messages, View Channels, and Read Message History. Add the bot's
-token into the appropriate field in your `.env` file. Adding a bot to your server automatically
+permissions: Manage Roles, Send Messages, Manage Messages, View Channels, and Read Message History.
+One you have a bot token, add it into your `.env` file. Adding a bot to your server automatically
 gives that bot its own role, named after the bot. You may need to set these permissions manually
-on that role.
+on that role. Also note that Discord roles have a hierarchy. The bot will only add and remove
+roles that you explicitly designate. If you encounter problems assigning or removing a spoiler
+role, check to make sure that it's correctly place in the role hierarchy.
 
-Murahdahla depends on three channels and two roles for administrating async races: a submission channel where times
-are entered, a leaderboard channel where a leaderboard for the current race is displayed, and a 
-spoiler channel where people can discuss the game, visible only after submitting a time. The first
-channel should be visible to everyone on the server, the rest should be visible only to those with
-a "spoilers" role that you create and enter into the `.env` file by its name. 
+A server owner will be able to run all bot commands (listed below.) Additionally, an owner
+can assign a "mod" role and an "admin" role to give other server members permission to
+run certain commands.
 
-The second role is a bot admin role; the bot will only accept commands to start and stop races
-from users with this role. Create this role (or use an existing role) and add its name to `.env`.
-You must also add the channels into `.env` by their channel number, which is the last number after
-the final slash `/` in the URL when that channel is opened.
+Note: Only regular games generated by versions of supported randomizers at the time of release
+are supported. Some "special" games like ALTTPR festives may not work correctly and there may be
+a gap between a new version of a randomizer and its games being supported.
 
-Once the binary is generated, you can move it and run it anywhere, as long as the `.env` file is
-in the directory it's being run from with all the fields filled in correctly.
+# Groups
 
-Notes: Currently Murahdahla only supports async races in one server per bot client. Adding the bot
-to multiple servers and running multiple races concurrently will result in unintened behavior.
-Only games generated by v31 of the randomizer and customizer are supported.
+Before starting a race, a server owner or admin must add a group with the `!addgroup` command
+and a yaml file attached (see the example in this repo.) Groups are composed of three channels
+and a spoiler role: a submission channel where races are started and where runners enter their
+times, a leaderboard channel where the bot displays a leaderboard for a currently active race,
+and a spoiler channel where runners can discuss the current game.
+
+Only the bot should have permissions to send messages in the leaderboard channel and the
+spoiler role should gate access to both the leaderboard and spoiler channels. You will have
+to configure this yourself as the bot currently will not do it automatically. Additionally,
+all the channels and roles contained in a yaml file must exist before the bot will accept it.
+
+**NOTE: When a group is active, all messages in the submission channel will be deleted! This
+is intentional. This includes commands and time submissions**
 
 # Starting and Stopping Races
 
-To start a race, a user with the bot admin role can use the `!start` command followed by a permalink
-to the game they want to race (ex: `!start https://alttpr.com/en/h/R6vBYxW5MP`). When you want to
-stop the race, you can use the `!stop` command, which removes the spoiler role from everyone
-who has it and edits the leaderboard into that game's message in the submission channel. If you
-start a new race without running the `!stop` command, the bot will automatically end the old race
-and move the leaderboard.
+Once you have a group set up, you can start a race. Races are timed by real-time (RTA) or
+in-game time (IGT.) There are separate commands for each, `!rtastart [argument]` and
+`!igtstart [argument]`. The argument you pass can be a URL to a randomizer game's permalink
+or some information about a game that will let participants play the same game. If you
+pass a URL and the bot supports that randomizer, it will gather some informatio about it
+to display. The bot will send one message in the leaderboard channel and one in the
+submission channel with the information you've provided (so theoretically a user who knows
+there is an active race can just look at that channel and have what they need to get started.)
+
+When a race is stopped, the leaderboard moves from the leaderboard channel to the submission
+channel. A race can be stopped with the `!stop` command or simply by starting a new race
+with another start command.
+
+# Bot Commands
+
+## Admin Commands
+
+**!addgroup** - Requires an attached yaml file (see example in this repo.) Adds a channel group.
+Multiple, non-overlapping channel groups can exist per server.
+
+**!removegroup [name]** - Removes a group with the name supplied.
+
+**!listgroups** - Sends a DM with a list of names of current groups.
+
+**!setadminrole [role name]** - Sets a role that will allow users with that role to run admin commands.
+
+**!setmodrole [role name]** - Sets a role that will allow users with that role to run mod commands.
+
+**!removeadminrole [role name]** - Removes previously set admin role. Users with that role will no longer
+be able to run admin commands.
+
+**!removemodrole [role name]** - Removes previously set mod role.
+
+## Mod Commands
+
+**!igtstart/!rtastart [URL or game info]**
+
+**!refresh** - Refreshes the leaderboard from the database.
+
+**!removetime [runner name]** - Removes a runner's submission from the leaderboard and their spoiler role.
+
+**!settime [runner name] [time]** - Changes the time of a runner's existing submission
+
+**!setcollection [runner name] [collection rate]** - Changes the collection rate of a runner's
+existing submission, if collection rate is being used for that game.
+
+
+# Support
+
+This bot is still a work in progress. It has been known to break or work incorrectly on
+occasion. I am willing to provide support and bug fixes provided you are running the bot on
+linux. Feel free to file a github issue or contact me on discord. If you don't have my
+contact info on discord, the person running the bot or the person who told you about this
+bot likely does. Please try to provide logs if available. If the bot is panicking/crashing,
+you can run it with `RUST_BACKTRACE=1` to get a backtrace.
+
+# Acknowledgements
+
+I would like to thank a few people for their help and assistance. First and foremost, Synack
+from the ALTTPR community has been a great help. Hosting an instance of the bot, providing
+logs, giving advice, and generally being a very solid guy. Thank you as well to timp and the
+GMP community for using the bot and providing feedback. Big thanks to Neerm for developing
+the original seed-of-the-week bot whose functionality this is based on.
