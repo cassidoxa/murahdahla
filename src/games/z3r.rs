@@ -1,37 +1,78 @@
-use std::{convert::TryFrom, str::FromStr};
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt,
+    io::Cursor,
+    str::from_utf8,
+    str::FromStr,
+};
 
 use anyhow::{anyhow, Error, Result};
-use chrono::naive::NaiveDate;
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use chrono::naive::{NaiveDate, NaiveTime};
 use reqwest::get;
 use serde_json::{from_value, Value};
 use url::Url;
 
 use crate::{
     discord::submissions::NewSubmission,
-    games::{AsyncGame, GameName},
+    games::{bitmask, AsyncGame, GameName, SaveParser},
     helpers::BoxedError,
 };
 
+const BASE_URL: &'static str = "https://s3.us-east-2.amazonaws.com/alttpr-patches/";
+const SRAM_CHECKSUM: u16 = 0x55AA;
+const ROM_NAMES: [&'static str; 2] = ["VT", "ER"];
+
+const fn code_map(value: u64) -> &'static str {
+    match value {
+        0 => "Bow",
+        1 => "Boomerang",
+        2 => "Hookshot",
+        3 => "Bombs",
+        4 => "Mushroom",
+        5 => "Powder",
+        6 => "Ice Rod",
+        7 => "Pendant",
+        8 => "Bombos",
+        9 => "Ether",
+        10 => "Quake",
+        11 => "Lamp",
+        12 => "Hammer",
+        13 => "Shovel",
+        14 => "Flute",
+        15 => "Net",
+        16 => "Book",
+        17 => "Empty Bottle",
+        18 => "Green Potion",
+        19 => "Somaria",
+        20 => "Cape",
+        21 => "Mirror",
+        22 => "Boots",
+        23 => "Gloves",
+        24 => "Flippers",
+        25 => "Pearl",
+        26 => "Shield",
+        27 => "Tunic",
+        28 => "Heart",
+        29 => "Map",
+        30 => "Compass",
+        31 => "Key",
+        _ => "Unknown",
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Z3rGame {
-    patch: Value,
+    map: Value,
     url: String,
 }
 
 impl Z3rGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        // we know we have an alttpr.com url. let's verify it's a link to a
-        // generated game. if the url contains "/h/" we should be good
-        match args_str.contains("/h/") {
-            true => (),
-            false => return Err(anyhow!("alttpr.com link does not contain a game").into()),
-        };
         let game_id = args_str.split("/").last().unwrap();
-        let patch = get_patch(game_id).await?;
+        let map = get_patch(game_id).await?;
         let url = args_str.to_string(); // we've already parsed this as a url and should know it's good
-        let game = Z3rGame {
-            patch: patch,
-            url: url,
-        };
+        let game = Z3rGame { map: map, url: url };
 
         Ok(game)
     }
@@ -42,7 +83,8 @@ async fn get_patch(game_id: &str) -> Result<Value> {
         "https://s3.us-east-2.amazonaws.com/alttpr-patches/{}.json",
         game_id
     );
-    let patch_json = get(url_string.as_str()).await?.json().await?;
+    let url = format!("{}{}.json", BASE_URL, game_id);
+    let patch_json = get(&url).await?.json().await?;
 
     Ok(patch_json)
 }
@@ -54,7 +96,7 @@ impl TryFrom<u16> for Z3rCollectionRate {
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         if value > 216 {
-            Err(anyhow!("ALTTPR Collection Rate must be a number from 0 to 216").into())
+            Err(anyhow!("ALTTPR collection rate not between 0 - 216").into())
         } else {
             Ok(Z3rCollectionRate(value))
         }
@@ -75,13 +117,13 @@ impl AsyncGame for Z3rGame {
 
     fn settings_str(&self) -> Result<String, BoxedError> {
         // TODO: check for "special" here because we need to handle festives etc differently
-        let game_json = &self.patch;
+        let game_json = &self.map;
         match game_json["spoiler"]["meta"]["spoilers"]
             .as_str()
             .ok_or::<BoxedError>(anyhow!("Error parsing spoiler meta information").into())
         {
             Ok("mystery") => {
-                let code: Vec<&str> = get_code(&game_json["patch"]);
+                let code: Vec<&str> = get_code(&game_json["patch"])?;
                 return Ok(format!(
                     "Mystery ({}/{}/{}/{}/{})",
                     code[0], code[1], code[2], code[3], code[4]
@@ -116,7 +158,7 @@ impl AsyncGame for Z3rGame {
         let ganon_crystals = game_json["spoiler"]["meta"]["entry_crystals_ganon"]
             .as_str()
             .ok_or::<BoxedError>(anyhow!("Error parsing Ganon crystals").into())?;
-        let code: Vec<&str> = get_code(&game_json["patch"]);
+        let code: Vec<&str> = get_code(&game_json["patch"])?;
 
         let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
             .as_str()
@@ -186,61 +228,26 @@ impl AsyncGame for Z3rGame {
 }
 
 #[inline]
-fn get_code(patch: &Value) -> Vec<&'static str> {
-    // we have to search for the code values here, they will not always
-    // be located at the same position in the json
-    // TODO: sort & binary search??
+fn get_code(patch: &Value) -> Result<Vec<&'static str>> {
     let mut code: Vec<&'static str> = Vec::with_capacity(5);
-    for i in patch.as_array().unwrap().iter() {
-        if i.as_object().unwrap().contains_key("1573397") {
-            code = from_value::<Vec<u8>>(i.get("1573397").unwrap().clone())
-                .unwrap()
-                .into_iter()
-                .map(|x| code_map(x))
-                .collect();
-            break;
-        }
-    }
 
-    code
-}
+    // it's pretty safe to unwrap here unless the alttpr patch format
+    // changes suddenly and dramatically
+    let code: Vec<&'static str> = patch
+        .as_array()
+        .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
+        .iter()
+        .find(|v| v.as_object().unwrap().contains_key("1573397"))
+        .ok_or_else(|| anyhow!("Could not find code offset in ALTTPR patch"))?
+        .get("1573397")
+        .unwrap()
+        .as_array()
+        .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
+        .iter() // now THATS what i call an iterator
+        .map(|x| code_map(x.as_u64().unwrap()))
+        .collect();
 
-const fn code_map(value: u8) -> &'static str {
-    match value {
-        0 => "Bow",
-        1 => "Boomerang",
-        2 => "Hookshot",
-        3 => "Bombs",
-        4 => "Mushroom",
-        5 => "Powder",
-        6 => "Ice Rod",
-        7 => "Pendant",
-        8 => "Bombos",
-        9 => "Ether",
-        10 => "Quake",
-        11 => "Lamp",
-        12 => "Hammer",
-        13 => "Shovel",
-        14 => "Flute",
-        15 => "Net",
-        16 => "Book",
-        17 => "Empty Bottle",
-        18 => "Green Potion",
-        19 => "Somaria",
-        20 => "Cape",
-        21 => "Mirror",
-        22 => "Boots",
-        23 => "Gloves",
-        24 => "Flippers",
-        25 => "Pearl",
-        26 => "Shield",
-        27 => "Tunic",
-        28 => "Heart",
-        29 => "Map",
-        30 => "Compass",
-        31 => "Key",
-        _ => "Unknown",
-    }
+    Ok(code)
 }
 
 pub fn game_info<'a>(
@@ -262,4 +269,139 @@ pub fn game_info<'a>(
     submission.set_collection(Some(collection));
 
     Ok(submission)
+}
+
+pub struct Z3rSram([u8; 32768]);
+
+// most of this is copied from z3r sram parsing tool here:
+// https://github.com/cassidoxa/z3r-sramr/
+// but that is mostly designed to support the python bindings
+// if/when i or someone else ever makes it into something more general
+// purpose it should be brought in as a dependency
+// but mostly we don't need a map with everything
+
+impl Z3rSram {
+    pub fn new_from_slice(s: &Vec<u8>) -> Result<Z3rSram, BoxedError> {
+        if s.len() != 32768 {
+            return Err(anyhow!("Incorrect file size for ALTTPR SRAM").into());
+        }
+        // i can't figure out how to use a ref to the actual attachment so let's
+        // just copy into a buffer here
+        let mut buf = [0; 32768];
+        buf.copy_from_slice(s);
+
+        let mut cur = Cursor::new(buf);
+        let checksum_validity: u16 = LittleEndian::read_u16(&buf[0x3E1..0x3E3]);
+        if checksum_validity != SRAM_CHECKSUM || buf[0x4F0] != 0xFF {
+            return Err(anyhow!("ALTTPR SRAM Validation Error: Invalid file").into());
+        }
+        // Check the first two characters of the rom name for VT or ER
+        let rom_name = &buf[0x2000..0x2002];
+        if ROM_NAMES
+            .iter()
+            .any(|&x| x == from_utf8(&rom_name).unwrap())
+            == false
+        {
+            return Err(anyhow!("ALTTPR SRAM Validation Error: Invalid ROM name").into());
+        }
+        // Now we check the SRAM's own "inverse" checksum
+        let mut checksum = 0u16;
+        cur.set_position(0x00);
+        while cur.position() < 0x4FE {
+            let bytes = cur.read_u16::<LittleEndian>()?;
+            checksum = checksum.overflowing_add(bytes).0;
+        }
+        let expected_inv_checksum = 0x5A5Au16.overflowing_sub(checksum).0;
+        let inv_checksum: u16 = LittleEndian::read_u16(&buf[0x4FE..0x500]);
+        if inv_checksum != expected_inv_checksum {
+            return Err(anyhow!("ALTTPR SRAM Validation Error: Invalid checksum").into());
+        }
+        Ok(Z3rSram(buf))
+    }
+}
+
+impl SaveParser for Z3rSram {
+    fn game_finished(&self) -> bool {
+        let slice = &self.0[..];
+        let mut cur = Cursor::new(slice);
+        let finished = get_stat(&mut cur, 0x423, 8, 0).unwrap();
+        match finished {
+            1u64 => true,
+            0u64 => false,
+            _ => false,
+        }
+    }
+
+    fn get_igt(&self) -> Result<NaiveTime, BoxedError> {
+        // just remembered that every array size is a distinct type
+        // .as_slice() exists but not stable yet
+        let slice = &self.0[..];
+        let mut cur = Cursor::new(slice);
+        let igt = Z3rStat::new_time(Some(&mut cur), 0x43Eu64);
+        let time = NaiveTime::parse_from_str(&igt.to_string(), "%H:%M:%S")?;
+
+        Ok(time)
+    }
+
+    fn get_collection_rate(&self) -> Option<u64> {
+        let slice = &self.0[..];
+        let mut cur = Cursor::new(slice);
+        let collection = get_stat(&mut cur, 0x423, 8, 0).ok();
+
+        collection
+    }
+}
+
+enum Z3rStat {
+    Number(u32),
+    Time(String),
+}
+
+impl Z3rStat {
+    fn new_time<T: Into<u64>>(cur: Option<&mut Cursor<&[u8]>>, num: T) -> Self {
+        let value: u32 = match cur {
+            Some(cur) => {
+                cur.set_position(num.into());
+                cur.read_u32::<LittleEndian>().unwrap()
+            }
+            None => num.into() as u32,
+        };
+        let hours: u32 = value / (216000u32);
+        let mut rem = value % 216000u32;
+        let minutes: u32 = rem / 3600u32;
+        rem %= 3600u32;
+        let seconds: u32 = rem / 60u32;
+
+        let time = format!("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
+
+        Z3rStat::Time(time)
+    }
+}
+
+impl fmt::Display for Z3rStat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Number(n) => write!(f, "{}", *n),
+            Self::Time(t) => write!(f, "{}", *t),
+        }
+    }
+}
+
+fn get_stat(
+    cur: &mut Cursor<&[u8]>,
+    offset: u64,
+    bits: u32,
+    shift: u32,
+) -> Result<u64, BoxedError> {
+    cur.set_position(offset);
+    let bytes: f32 = ((bits as f32 + shift as f32) / 8f32).ceil();
+    let mut value = match bytes as u8 {
+        1 => cur.read_u8().unwrap() as u32,
+        2 => cur.read_u16::<LittleEndian>().unwrap() as u32,
+        _ => return Err(anyhow!("Tried reading more than two bytes at {}", offset).into()),
+    };
+    value >>= shift;
+    value &= bitmask(bits);
+
+    Ok(value as u64)
 }

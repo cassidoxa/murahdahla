@@ -23,17 +23,22 @@ use uuid::Uuid;
 
 use crate::{
     discord::{channel_groups::ChannelGroup, servers::DiscordServer},
-    games::{other::OtherGame, z3r::Z3rGame},
+    games::{
+        other::OtherGame,
+        smz3::SMZ3Game,
+        z3r::{Z3rGame, Z3rSram},
+    },
     helpers::*,
     schema::*,
     BoxedError,
 };
 
 pub mod other;
+pub mod smz3;
 pub mod z3r;
 
 pub type BoxedGame = Box<dyn AsyncGame + Send + Sync>;
-// const PERMALINKS: [&str; 3] = ["alttpr.com", "samus.link", "ff4fe.com"];
+pub type BoxedSave = Box<dyn SaveParser + Send + Sync + 'static>;
 
 #[derive(Debug, Queryable, Identifiable, Associations)]
 #[belongs_to(parent = "ChannelGroup", foreign_key = "channel_group_id")]
@@ -190,14 +195,15 @@ pub trait AsyncGame {
 
 pub fn determine_game(args_str: &str) -> GameName {
     // we parse as a url here just to determine the game then discard the url
-    // we could probably return this info to the caller just
+    // TODO: if we have, say, a festive alttpr url without /h/, we could make it an
+    // other game
     let game_url = match Url::parse(args_str) {
         Ok(u) => u,
         Err(_) => return GameName::Other,
     };
     match game_url.host_str() {
-        Some(g) if g == "alttpr.com" => GameName::ALTTPR,
-        // Some(g) if g == "samus.link" => GameName::SMZ3,
+        Some(g) if (g == "alttpr.com" && game_url.path().contains("/h/")) => GameName::ALTTPR,
+        Some(g) if (g == "samus.link" && game_url.path().contains("/seed")) => GameName::SMZ3,
         // Some(g) if g == "ff4fe.com" => GameName::FF4FE,
         // Some(g) if g == "randommetroidsolver.pythonanywhere.com" => GameName::SMVARIA,
         // Some(g) if g == "sm.samus.link" => GameName::SMTotal,
@@ -210,8 +216,16 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
     let game_category = determine_game(args.rest());
     match game_category {
         GameName::ALTTPR => Ok(Box::new(Z3rGame::new_from_str(args.rest()).await?)),
+        GameName::SMZ3 => Ok(Box::new(SMZ3Game::new_from_str(args.rest()).await?)),
         GameName::Other => Ok(Box::new(OtherGame::new_from_str(args.rest())?)),
         _ => Err(anyhow!("Tried to start unknown game").into()),
+    }
+}
+
+pub fn get_save_boxed(maybe_save: &Vec<u8>, game: GameName) -> Result<BoxedSave, BoxedError> {
+    match game {
+        GameName::ALTTPR => Ok(Box::new(Z3rSram::new_from_slice(maybe_save)?)),
+        _ => Err(anyhow!("Received file for game that doesn't support save parsing").into()),
     }
 }
 
@@ -225,14 +239,14 @@ pub fn get_maybe_active_race(conn: &PooledConn, group: &ChannelGroup) -> Option<
         .ok()
 }
 
-pub trait SaveReader {
-    fn game_finished(&self, game: GameName) -> bool;
+pub trait SaveParser {
+    fn game_finished(&self) -> bool;
 
-    fn get_igt(&self, game: GameName) -> NaiveTime;
+    fn get_igt(&self) -> Result<NaiveTime, BoxedError>;
 
-    fn get_collection_rate(&self, game: GameName) -> Option<u64>;
+    fn get_collection_rate(&self) -> Option<u64>;
 }
 
-// impl SaveReader for &[u8] {
-//
-// }
+pub fn bitmask(bits: u32) -> u32 {
+    (1u32 << bits) - 1u32
+}

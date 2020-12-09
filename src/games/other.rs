@@ -5,6 +5,7 @@ use crate::{
     helpers::BoxedError,
 };
 
+#[derive(Debug, Clone)]
 pub struct OtherGame {
     text: String,
 }

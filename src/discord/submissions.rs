@@ -16,7 +16,7 @@ use crate::{
         channel_groups::{ChannelGroup, ChannelType},
         messages::BotMessage,
     },
-    games::{z3r, AsyncRaceData, GameName, RaceType},
+    games::{get_save_boxed, smz3, z3r, AsyncRaceData, GameName, RaceType},
     helpers::*,
     schema::*,
 };
@@ -167,6 +167,7 @@ impl NewSubmission {
         self.race_game = game;
         match game {
             GameName::ALTTPR => Ok(z3r::game_info(self, submission_msg)?.clone()),
+            GameName::SMZ3 => Ok(smz3::game_info(self, submission_msg)?.clone()),
             GameName::Other => Ok(self.clone()),
             _ => Err(anyhow!("Game not yet implemented").into()),
         }
@@ -216,7 +217,9 @@ pub async fn process_submission(
         return Ok(());
     }
     // first check to see if the user has forfeited
-    if FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
+    // the length check here should short circuit so we don't have to worry
+    // about panicking if there's no text
+    if maybe_submission_text.len() >= 1 && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
         insert_forfeit(&ctx, &msg, &group, &race).await?;
         info!(
             "Successfully entered submission for user \"{}\"",
@@ -304,11 +307,38 @@ async fn insert_save(
     msg: &Message,
     group: &ChannelGroup,
     race: &AsyncRaceData,
-) -> Result<()> {
+) -> Result<(), BoxedError> {
     use crate::schema::submissions::columns::*;
     use crate::schema::submissions::dsl::*;
 
-    todo!();
+    // we've already checked that the msg has exactly one attachment
+    let maybe_save: Vec<u8> = msg.attachments[0].download().await?;
+    let save = get_save_boxed(&maybe_save, race.race_game)?;
+
+    // this can be cleaned up but i'd like to develop the z3r sram
+    // reading crate into something better and more general purpose first
+    let mut collection_vec: Vec<&str> = Vec::with_capacity(1);
+    let maybe_collection = save.get_collection_rate();
+    let mut maybe_collection_str = String::with_capacity(3);
+    match maybe_collection {
+        Some(cr) => {
+            maybe_collection_str.push_str(cr.to_string().as_str());
+            collection_vec.push(&maybe_collection_str);
+        }
+        None => (),
+    };
+
+    let mut submission = NewSubmission::default()
+        .set_runner_id(msg.author.id)
+        .set_race_id(race.race_id)
+        .name(&msg.author.name)
+        .set_time(save.get_igt().ok())
+        .set_game_info(race.race_game, &collection_vec)?;
+    let conn = get_connection(&ctx).await;
+    diesel::insert_into(submissions)
+        .values(submission)
+        .execute(&conn)?;
+    Ok(())
 }
 
 fn igt_attachment_check(msg: &Message, race: &AsyncRaceData) -> bool {

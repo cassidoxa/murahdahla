@@ -174,7 +174,7 @@ pub async fn handle_new_race_messages(
         &game.settings_str()?
     );
     if game.has_url() {
-        base_game_string.push_str(format!(" - {}", game.game_url().unwrap()).as_str());
+        base_game_string.push_str(format!(" - <{}>", game.game_url().unwrap()).as_str());
     }
     let lb_string = format!("Leaderboard for {}\n", base_game_string);
 
