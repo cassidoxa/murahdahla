@@ -487,7 +487,6 @@ pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
         }
         _ => return Err(anyhow!("Tried to parse malformed time")),
     };
-    dbg!(&time_string);
     let time = NaiveTime::parse_from_str(&time_string, "%H:%M:%S").map_err(|e| anyhow!("{}", e));
 
     time

@@ -15,7 +15,7 @@ use crate::{
         servers::add_spoiler_role,
         submissions::{process_submission, refresh_leaderboard, Submission},
     },
-    games::{get_maybe_active_race, AsyncRaceData, BoxedGame},
+    games::{get_maybe_active_race, AsyncRaceData, BoxedGame, GameName},
     helpers::*,
     schema::*,
 };
@@ -165,16 +165,16 @@ pub async fn handle_new_race_messages(
 ) -> Result<(), BoxedError> {
     use crate::schema::messages::dsl::*;
 
-    let mut base_game_string = format!(
-        "{} - {} ({}) - {}",
-        race_data.race_date,
-        &game.game_name(),
-        race_data.race_type,
-        &game.settings_str()?
-    );
+    let mut base_game_string = format!("{} - ", race_data.race_date);
+    if race_data.race_game != GameName::Other {
+        base_game_string.push_str(format!("{} - ", &game.game_name()).as_str());
+    }
+    base_game_string
+        .push_str(format!("({}) - {}", race_data.race_type, &game.settings_str()?).as_str());
     if game.has_url() {
         base_game_string.push_str(format!(" - <{}>", game.game_url().unwrap()).as_str());
     }
+
     let lb_string = format!("Leaderboard for {}\n", base_game_string);
 
     let sub_channel = ChannelId::from(group.submission);

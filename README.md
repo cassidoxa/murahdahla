@@ -172,7 +172,8 @@ you can run it with `RUST_BACKTRACE=1` to get a backtrace.
 # Acknowledgements
 
 I would like to thank a few people for their help and assistance. First and foremost, Synack
-from the ALTTPR community has been a great help. Hosting an instance of the bot, providing
-logs, giving advice, and generally being a very solid guy. Thank you as well to timp and the
-GMP community for using the bot and providing feedback. Big thanks to Neerm for developing
-the original seed-of-the-week bot whose functionality this is based on.
+from the ALTTPR community for hosting an instance of the bot, providing
+logs, giving advice, and generally being a very solid guy. Without shamelessly borrowing his
+pyz3r implementations it would have taken a lot more time and effort to write this. Thank you
+as well to timp and the GMP community for using the bot and providing feedback. Big thanks
+to Neerm for developing the original seed-of-the-week bot whose functionality this is based on.
