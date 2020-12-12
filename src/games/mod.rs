@@ -41,6 +41,8 @@ pub struct AsyncRaceData {
     pub race_date: NaiveDate,
     pub race_game: GameName,
     pub race_type: RaceType,
+    pub race_info: String,
+    pub race_url: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -51,19 +53,33 @@ pub struct NewAsyncRaceData {
     pub race_date: NaiveDate,
     pub race_game: GameName,
     pub race_type: RaceType,
+    pub race_info: String,
+    pub race_url: Option<String>,
 }
 
 impl NewAsyncRaceData {
-    pub fn new_from_game(game: &BoxedGame, group_id: &Vec<u8>, race_type: RaceType) -> Self {
+    pub fn new_from_game(
+        game: &BoxedGame,
+        group_id: &Vec<u8>,
+        race_type: RaceType,
+    ) -> Result<Self, BoxedError> {
         let todays_date = Utc::today().naive_utc();
+        let settings_string = game.settings_str()?;
+        let maybe_url: Option<String>;
+        match game.has_url() {
+            true => maybe_url = Some(game.game_url().unwrap().to_owned()),
+            false => maybe_url = None,
+        };
 
-        NewAsyncRaceData {
+        Ok(NewAsyncRaceData {
             channel_group_id: group_id.clone(),
             race_active: true,
             race_date: todays_date,
             race_game: game.game_name(),
             race_type: race_type,
-        }
+            race_info: settings_string,
+            race_url: maybe_url,
+        })
     }
 }
 
@@ -237,6 +253,54 @@ pub trait SaveParser {
     fn get_collection_rate(&self) -> Option<u64>;
 }
 
-pub fn bitmask(bits: u32) -> u32 {
-    (1u32 << bits) - 1u32
+pub trait DataDisplay {
+    fn base_string(&self) -> String;
+
+    fn leaderboard_string(&self) -> String;
+}
+
+impl DataDisplay for NewAsyncRaceData {
+    fn base_string(&self) -> String {
+        let mut base_game_string = format!("{} - ", self.race_date);
+        if self.race_game != GameName::Other {
+            base_game_string.push_str(format!("{} - ", self.race_game).as_str());
+        }
+        base_game_string.push_str(format!("({}) - {}", self.race_type, self.race_info).as_str());
+        if self.race_url.is_some() {
+            base_game_string.push_str(format!(" - <{}>", self.race_url.as_ref().unwrap()).as_str());
+        }
+
+        base_game_string
+    }
+
+    fn leaderboard_string(&self) -> String {
+        let base_game_string = self.base_string();
+        let lb_string = format!("Leaderboard for {}", base_game_string);
+
+        lb_string
+    }
+}
+
+impl DataDisplay for AsyncRaceData {
+    // we could maybe return &str instead of Strings here and maybe save a bit of
+    // memory?
+    fn base_string(&self) -> String {
+        let mut base_game_string = format!("{} - ", self.race_date);
+        if self.race_game != GameName::Other {
+            base_game_string.push_str(format!("{} ", self.race_game).as_str());
+        }
+        base_game_string.push_str(format!("({}) - {}", self.race_type, self.race_info).as_str());
+        if self.race_url.is_some() {
+            base_game_string.push_str(format!(" - <{}>", self.race_url.as_ref().unwrap()).as_str());
+        }
+
+        base_game_string
+    }
+
+    fn leaderboard_string(&self) -> String {
+        let base_game_string = self.base_string();
+        let lb_string = format!("Leaderboard for {}", base_game_string);
+
+        lb_string
+    }
 }

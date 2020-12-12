@@ -31,6 +31,8 @@ CREATE TABLE async_races(
     race_date DATE NOT NULL,
     race_game TINYTEXT NOT NULL,
     race_type TINYTEXT NOT NULL,
+    race_info TEXT NOT NULL,
+    race_url TINYTEXT,
     INDEX (race_id, channel_group_id),
     FOREIGN KEY (channel_group_id)
         REFERENCES channels(channel_group_id)

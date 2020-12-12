@@ -1,4 +1,3 @@
-// #![allow(dead_code, unused_mut, unused_variables, unused_imports)]
 use std::env;
 
 #[macro_use]
@@ -47,6 +46,8 @@ async fn main() -> anyhow::Result<()> {
         .event_handler(Handler)
         .await
         .expect("Error creating client");
+    // theoretically we can avoid some http requests if we cache some messages here
+    client.cache_and_http.cache.set_max_messages(2).await;
 
     {
         let mut data = client.data.write().await;
@@ -70,6 +71,4 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-
-    // todo!();
 }

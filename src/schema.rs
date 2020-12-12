@@ -6,6 +6,8 @@ table! {
         race_date -> Date,
         race_game -> Tinytext,
         race_type -> Tinytext,
+        race_info -> Text,
+        race_url -> Nullable<Tinytext>,
     }
 }
 

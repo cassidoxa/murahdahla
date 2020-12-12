@@ -71,3 +71,8 @@ pub fn new_uuid() -> Vec<u8> {
 
     new_uuid
 }
+
+#[inline]
+pub fn bitmask(bits: u32) -> u32 {
+    (1u32 << bits) - 1u32
+}

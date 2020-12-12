@@ -13,9 +13,9 @@ use crate::{
     discord::{
         channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
         servers::add_spoiler_role,
-        submissions::{process_submission, refresh_leaderboard, Submission},
+        submissions::{build_leaderboard, process_submission, Submission},
     },
-    games::{get_maybe_active_race, AsyncRaceData, BoxedGame, GameName},
+    games::{get_maybe_active_race, AsyncRaceData, DataDisplay},
     helpers::*,
     schema::*,
 };
@@ -115,7 +115,7 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     // they can probably be done concurrently
     let role_fut = add_spoiler_role(&ctx, &msg, group.spoiler_role_id);
     // refresh leaderboard from db
-    let lb_fut = refresh_leaderboard(&ctx, &group, &race);
+    let lb_fut = build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard);
     let delete_fut = delete_sub_msg(&ctx, &msg);
 
     match try_join!(role_fut, lb_fut, delete_fut) {
@@ -160,33 +160,19 @@ pub fn build_listgroups_message(mut groups: Vec<String>) -> String {
 pub async fn handle_new_race_messages(
     ctx: &Context,
     group: &ChannelGroup,
-    game: &BoxedGame,
     race_data: &AsyncRaceData,
 ) -> Result<(), BoxedError> {
     use crate::schema::messages::dsl::*;
 
-    let mut base_game_string = format!("{} - ", race_data.race_date);
-    if race_data.race_game != GameName::Other {
-        base_game_string.push_str(format!("{} - ", &game.game_name()).as_str());
-    }
-    base_game_string
-        .push_str(format!("({}) - {}", race_data.race_type, &game.settings_str()?).as_str());
-    if game.has_url() {
-        base_game_string.push_str(format!(" - <{}>", game.game_url().unwrap()).as_str());
-    }
-
-    let lb_string = format!("Leaderboard for {}\n", base_game_string);
-
+    let base_game_string = race_data.base_string();
+    let leaderboard_string = race_data.leaderboard_string();
     let sub_channel = ChannelId::from(group.submission);
     let lb_channel = ChannelId::from(group.leaderboard);
-
     let (lb_message, sub_message) = try_join!(
-        lb_channel.say(&ctx, &lb_string),
+        lb_channel.say(&ctx, &leaderboard_string),
         sub_channel.say(&ctx, &base_game_string)
     )?;
 
-    // a reference to PooledConnection is not Send so we need to grab a connection here
-    // instead of passing one in
     let conn = get_connection(&ctx).await;
     let new_messages = vec![
         BotMessage::from_serenity_msg(
@@ -220,21 +206,6 @@ pub fn get_lb_msgs_data(conn: &PooledConn, this_race_id: u32) -> Result<Vec<BotM
         .load::<BotMessage>(conn)?;
     active_posts.sort_by(|a, b| b.message_datetime.cmp(&a.message_datetime).reverse());
     Ok(active_posts)
-}
-
-#[inline]
-pub fn get_submission_msg_data(conn: &PooledConn, this_race_id: u32) -> Result<BotMessage> {
-    // this function should only ever be called when we know there is currently an active race
-    // with an associated submission message
-    use crate::schema::messages::columns::*;
-    use crate::schema::messages::dsl::messages;
-
-    let sub_message = messages
-        .filter(race_id.eq(this_race_id))
-        .filter(channel_type.eq(ChannelType::Submission))
-        .first::<BotMessage>(conn)?;
-
-    Ok(sub_message)
 }
 
 #[inline]

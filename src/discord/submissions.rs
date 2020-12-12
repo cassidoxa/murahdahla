@@ -13,7 +13,7 @@ use crate::{
         channel_groups::{ChannelGroup, ChannelType},
         messages::BotMessage,
     },
-    games::{get_save_boxed, smtotal, smz3, z3r, AsyncRaceData, GameName, RaceType},
+    games::{get_save_boxed, smtotal, smz3, z3r, AsyncRaceData, DataDisplay, GameName, RaceType},
     helpers::*,
     schema::*,
 };
@@ -334,20 +334,24 @@ fn igt_attachment_check(msg: &Message, race: &AsyncRaceData) -> bool {
         && msg.attachments.len() == 1
 }
 
-pub async fn refresh_leaderboard(
+pub async fn build_leaderboard(
     ctx: &Context,
     group: &ChannelGroup,
     race: &AsyncRaceData,
+    target: ChannelType,
 ) -> Result<(), BoxedError> {
     // the caller needs to have checked if there is currently an active race
     // which means we have a leaderboard message to work with
     use crate::schema::messages::columns::*;
     use crate::schema::submissions::columns::runner_forfeit;
 
+    let target_channel_id: u64 = match target {
+        ChannelType::Leaderboard => group.leaderboard,
+        ChannelType::Submission => group.submission,
+        _ => return Err(anyhow!("Did not specify a target channel to put leaderboard in").into()),
+    };
     let conn = get_connection(&ctx).await;
     // collect a vector of submissions for this race and sort it
-    // we will feed these to a formatting closure that decides how to
-    // display them
     let mut leaderboard: Vec<Submission> = Submission::belonging_to(race)
         .filter(runner_forfeit.eq(false))
         .load::<Submission>(&conn)?;
@@ -358,20 +362,13 @@ pub async fn refresh_leaderboard(
             .then(b.runner_collection.cmp(&a.runner_collection).reverse())
             .then(b.option_number.cmp(&a.option_number).reverse())
     });
-
-    // grab the top post, get the "header," construct one formatted string with every
-    // submission we want to display.
     let time_now = Utc::now().naive_utc();
     let mut lb_posts_data: Vec<BotMessage> = BotMessage::belonging_to(race)
-        .filter(channel_type.eq(ChannelType::Leaderboard))
+        .filter(channel_type.eq(target))
         .load::<BotMessage>(&conn)?;
     lb_posts_data.sort_by(|a, b| b.message_datetime.cmp(&a.message_datetime).reverse());
-    let top_lb_post = ctx
-        .http
-        .get_message(group.leaderboard, lb_posts_data[0].message_id)
-        .await?;
+    let leaderboard_header = race.leaderboard_string();
     // approximating how much to allocate here
-    let leaderboard_header = &top_lb_post.content.split("\n").collect::<Vec<&str>>()[0];
     let mut lb_string = String::with_capacity(leaderboard.len() * 40 + 150);
     let mut count: u32 = 1;
     lb_string.push_str(format!("{}\n", leaderboard_header).as_str());
@@ -385,20 +382,37 @@ pub async fn refresh_leaderboard(
         }
     });
 
-    fill_leaderboard(&ctx, &group, &mut lb_posts_data, &lb_string).await?;
+    fill_leaderboard(
+        &ctx,
+        &mut lb_posts_data,
+        &lb_string,
+        &group,
+        target,
+        target_channel_id,
+    )
+    .await?;
 
     Ok(())
 }
 
 async fn fill_leaderboard(
     ctx: &Context,
-    group: &ChannelGroup,
     mut lb_posts_data: &mut Vec<BotMessage>,
     lb_string: &String,
+    group: &ChannelGroup,
+    target: ChannelType,
+    target_channel_id: u64,
 ) -> Result<(), BoxedError> {
     let necessary_posts: usize = lb_string.len() / 2000 + 1;
     if necessary_posts > lb_posts_data.len() {
-        lb_posts_data = resize_leaderboard(&ctx, &group, lb_posts_data).await?;
+        lb_posts_data = resize_leaderboard(
+            &ctx,
+            group.server_id,
+            target,
+            target_channel_id,
+            lb_posts_data,
+        )
+        .await?;
     }
     // fill buffer then send the post until there's no more
     let mut post_buffer = String::with_capacity(2000);
@@ -422,7 +436,7 @@ async fn fill_leaderboard(
                 } else if line.len() + post_buffer.len() > 2000 {
                     let mut post = ctx
                         .http
-                        .get_message(group.leaderboard, post_iterator.next().unwrap().message_id)
+                        .get_message(target_channel_id, post_iterator.next().unwrap().message_id)
                         .await?;
                     post.edit(ctx, |x| x.content(&post_buffer)).await?;
                     post_buffer.clear();
@@ -431,7 +445,7 @@ async fn fill_leaderboard(
             None => {
                 let mut post = ctx
                     .http
-                    .get_message(group.leaderboard, post_iterator.next().unwrap().message_id)
+                    .get_message(target_channel_id, post_iterator.next().unwrap().message_id)
                     .await?;
                 post.edit(ctx, |x| x.content(post_buffer)).await?;
                 break;
@@ -444,21 +458,19 @@ async fn fill_leaderboard(
 
 async fn resize_leaderboard<'a>(
     ctx: &Context,
-    group: &ChannelGroup,
+    this_server_id: u64,
+    target: ChannelType,
+    target_channel_id: u64,
     lb_posts: &'a mut Vec<BotMessage>,
 ) -> Result<&'a mut Vec<BotMessage>, BoxedError> {
     use crate::schema::messages::dsl::*;
     // we only ever need one more post than we have to hold all submissions
     let conn = get_connection(&ctx).await;
-    let new_message: Message = ChannelId::from(group.leaderboard)
+    let new_message: Message = ChannelId::from(target_channel_id)
         .say(&ctx, "Placeholder")
         .await?;
-    let new_msg_data = BotMessage::from_serenity_msg(
-        &new_message,
-        group.server_id,
-        lb_posts[0].race_id,
-        ChannelType::Leaderboard,
-    );
+    let new_msg_data =
+        BotMessage::from_serenity_msg(&new_message, this_server_id, lb_posts[0].race_id, target);
 
     diesel::insert_into(messages)
         .values(&new_msg_data)

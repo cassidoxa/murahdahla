@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use crate::{
     discord::submissions::NewSubmission,
-    games::{bitmask, AsyncGame, GameName, SaveParser},
-    helpers::BoxedError,
+    games::{AsyncGame, GameName, SaveParser},
+    helpers::{bitmask, BoxedError},
 };
 
 const BASE_URL: &'static str = "https://s3.us-east-2.amazonaws.com/alttpr-patches/";

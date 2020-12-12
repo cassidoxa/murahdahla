@@ -8,22 +8,18 @@ use serenity::{
         macros::{command, group, hook},
         Args, CommandError, CommandResult,
     },
-    model::{
-        channel::{Message, ReactionType},
-        id::ChannelId,
-    },
+    model::channel::{Message, ReactionType},
     prelude::*,
 };
 
 use crate::{
     discord::{
-        channel_groups::{get_group, in_submission_channel, ChannelGroup},
+        channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
         messages::{
-            build_listgroups_message, get_lb_msgs_data, get_submission_msg_data,
-            handle_new_race_messages, BotMessage,
+            build_listgroups_message, get_lb_msgs_data, handle_new_race_messages, BotMessage,
         },
         servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
-        submissions::{parse_variable_time, refresh_leaderboard, Submission},
+        submissions::{build_leaderboard, parse_variable_time, Submission},
     },
     games::{
         get_game_boxed, get_maybe_active_race, AsyncRaceData, BoxedGame, NewAsyncRaceData, RaceType,
@@ -384,7 +380,7 @@ pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResu
             &msg.author.name, e
         ),
     };
-    refresh_leaderboard(&ctx, &group, &race).await?;
+    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
@@ -401,7 +397,7 @@ pub async fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
 
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
-        Some(r) => refresh_leaderboard(&ctx, &group, &r).await?,
+        Some(r) => build_leaderboard(&ctx, &group, &r, ChannelType::Leaderboard).await?,
         None => return Ok(()),
     };
 
@@ -452,7 +448,7 @@ pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     diesel::update(&submission)
         .set(runner_time.eq(new_time))
         .execute(&conn)?;
-    refresh_leaderboard(&ctx, &group, &race).await?;
+    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
@@ -498,7 +494,7 @@ pub async fn setcollection(ctx: &Context, msg: &Message, mut args: Args) -> Comm
     diesel::update(&submission)
         .set(runner_collection.eq(new_collection))
         .execute(&conn)?;
-    refresh_leaderboard(&ctx, &group, &race).await?;
+    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
@@ -574,13 +570,12 @@ async fn start_race(
     };
     let game: BoxedGame = get_game_boxed(&args).await?;
     let new_race_data =
-        NewAsyncRaceData::new_from_game(&game, &group.channel_group_id, this_race_type);
+        NewAsyncRaceData::new_from_game(&game, &group.channel_group_id, this_race_type)?;
     insert_into(async_races)
         .values(&new_race_data)
         .execute(&conn)?;
 
-    // pull this back out to get the race id :shrug:
-    // mysql does not support returning statements
+    // we need to pull this back out for the race id
     let race_data: AsyncRaceData = async_races
         .filter(channel_group_id.eq(&group.channel_group_id))
         .filter(race_active.eq(true))
@@ -588,65 +583,36 @@ async fn start_race(
 
     // use boxed game to build and post messages in submission and leaderboard channels
     // add both messages to messages table. rows in this table belong to async races.
-    handle_new_race_messages(&ctx, &group, &game, &race_data).await?;
+    handle_new_race_messages(&ctx, &group, &race_data).await?;
 
     Ok(())
 }
 
-async fn stop_race(ctx: &Context, race: &AsyncRaceData, group: &ChannelGroup) -> Result<()> {
+async fn stop_race(
+    ctx: &Context,
+    race: &AsyncRaceData,
+    group: &ChannelGroup,
+) -> Result<(), BoxedError> {
     use crate::schema::async_races;
     let conn = get_connection(&ctx).await;
     diesel::update(race)
         .set(async_races::race_active.eq(false))
         .execute(&conn)?;
-
-    // there will always only be one submission message per race
-    let sub_msg_data = get_submission_msg_data(&conn, race.race_id)?;
-    let mut submission_msg = ctx
-        .http
-        .get_message(sub_msg_data.channel_id, sub_msg_data.message_id)
-        .await?;
-
-    // theoretically we already have a perfectly formed leaderboard in this group
-    // so we can just grab it then edit the submission msg + send any extras for
-    // larger leaderboards.
-    let mut leaderboard_msgs_data: Vec<BotMessage> = get_lb_msgs_data(&conn, race.race_id)?;
+    let leaderboard_msgs_data: Vec<BotMessage> = get_lb_msgs_data(&conn, race.race_id)?;
     if leaderboard_msgs_data.len() == 0 {
         // this should never happen
-        let err: &'static str =
-            "Tried to stop active game with no leaderboard messages in database";
-        error!("{}", &err);
-        return Err(anyhow!(err).into());
-    } else if leaderboard_msgs_data.len() == 1 {
-        let lb_msg_data = &leaderboard_msgs_data[0];
-        let lb_msg = ctx
-            .http
-            .get_message(lb_msg_data.channel_id, lb_msg_data.message_id)
-            .await?;
-        let sub_msg_fut = submission_msg.edit(&ctx, |m| m.content(&lb_msg.content));
-        let lb_msg_fut = lb_msg.delete(&ctx);
-        try_join!(sub_msg_fut, lb_msg_fut)?;
-    } else {
-        let sub_channel = ChannelId::from(sub_msg_data.channel_id);
-        let lb_msg_data = leaderboard_msgs_data.remove(0);
-        let lb_msg = ctx
-            .http
-            .get_message(lb_msg_data.channel_id, lb_msg_data.message_id)
-            .await?;
-        let sub_msg_fut = submission_msg.edit(&ctx, |m| m.content(&lb_msg.content));
-        let lb_msg_fut = lb_msg.delete(&ctx);
-        try_join!(sub_msg_fut, lb_msg_fut)?;
-        // we loop through the additional messages if we have a leaderboard > 1 message
-        for d in leaderboard_msgs_data.iter() {
-            let msg = ctx.http.get_message(d.channel_id, d.message_id).await?;
-            let sub_msg_fut = sub_channel.say(&ctx, &msg.content);
-            let lb_msg_fut = msg.delete(&ctx);
-            try_join!(sub_msg_fut, lb_msg_fut)?;
-        }
+        return Err(
+            anyhow!("Tried to stop active game with no leaderboard messages in database").into(),
+        );
+    }
+    for d in leaderboard_msgs_data.iter() {
+        let _ = ctx.http.delete_message(d.channel_id, d.message_id).await?;
     }
 
-    // remove spoiler roles to revoke access to spoiler channel when game is over
-    remove_spoiler_roles(&ctx, &group, &race).await?;
+    let lb_fut = build_leaderboard(&ctx, &group, &race, ChannelType::Submission);
+    let role_del_fut = remove_spoiler_roles(&ctx, &group, &race);
+
+    try_join!(lb_fut, role_del_fut)?;
 
     Ok(())
 }
@@ -655,7 +621,7 @@ async fn remove_spoiler_roles(
     ctx: &Context,
     group: &ChannelGroup,
     race: &AsyncRaceData,
-) -> Result<()> {
+) -> Result<(), BoxedError> {
     // collect the user ids of everyone with a submission in this race
     // so we can use them to remove the spoiler role when the race has stopped
     use crate::schema::submissions::columns::*;
