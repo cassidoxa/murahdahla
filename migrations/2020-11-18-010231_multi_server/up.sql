@@ -33,7 +33,7 @@ CREATE TABLE async_races(
     race_type TINYTEXT NOT NULL,
     race_info TEXT NOT NULL,
     race_url TINYTEXT,
-    INDEX (race_id, channel_group_id),
+    INDEX (channel_group_id),
     FOREIGN KEY (channel_group_id)
         REFERENCES channels(channel_group_id)
         ON DELETE CASCADE
@@ -64,6 +64,7 @@ CREATE TABLE submissions(
     option_number INT UNSIGNED,
     option_text TINYTEXT,
     runner_forfeit TINYINT(1) NOT NULL,
+    INDEX (race_id),
     FOREIGN KEY (race_id)
         REFERENCES async_races(race_id)
 );
