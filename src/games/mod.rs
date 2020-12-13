@@ -14,6 +14,7 @@ use crate::{
     games::{
         other::OtherGame,
         smtotal::SMTotalGame,
+        smvaria::SMVARIAGame,
         smz3::SMZ3Game,
         z3r::{Z3rGame, Z3rSram},
     },
@@ -24,6 +25,7 @@ use crate::{
 
 pub mod other;
 pub mod smtotal;
+pub mod smvaria;
 pub mod smz3;
 pub mod z3r;
 
@@ -211,8 +213,13 @@ pub fn determine_game(args_str: &str) -> GameName {
         Some(g) if (g == "alttpr.com" && game_url.path().contains("/h/")) => GameName::ALTTPR,
         Some(g) if (g == "samus.link" && game_url.path().contains("/seed")) => GameName::SMZ3,
         Some(g) if (g == "sm.samus.link" && game_url.path().contains("/seed")) => GameName::SMTotal,
+        Some(g)
+            if (g == "randommetroidsolver.pythonanywhere.com"
+                && game_url.path().contains("/customizer")) =>
+        {
+            GameName::SMVARIA
+        }
         // Some(g) if g == "ff4fe.com" => GameName::FF4FE,
-        // Some(g) if g == "randommetroidsolver.pythonanywhere.com" => GameName::SMVARIA,
         Some(_) => GameName::Other,
         None => GameName::Other,
     }
@@ -224,6 +231,7 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
         GameName::ALTTPR => Ok(Box::new(Z3rGame::new_from_str(args.rest()).await?)),
         GameName::SMZ3 => Ok(Box::new(SMZ3Game::new_from_str(args.rest()).await?)),
         GameName::SMTotal => Ok(Box::new(SMTotalGame::new_from_str(args.rest()).await?)),
+        GameName::SMVARIA => Ok(Box::new(SMVARIAGame::new_from_str(args.rest()).await?)),
         GameName::Other => Ok(Box::new(OtherGame::new_from_str(args.rest())?)),
         _ => Err(anyhow!("Tried to start unknown game").into()),
     }

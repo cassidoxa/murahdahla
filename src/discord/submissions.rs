@@ -166,6 +166,7 @@ impl NewSubmission {
             GameName::ALTTPR => Ok(z3r::game_info(self, submission_msg)?.clone()),
             GameName::SMZ3 => Ok(smz3::game_info(self, submission_msg)?.clone()),
             GameName::SMTotal => Ok(smtotal::game_info(self, submission_msg)?.clone()),
+            GameName::SMVARIA => Ok(smtotal::game_info(self, submission_msg)?.clone()),
             GameName::Other => Ok(self.clone()),
             _ => Err(anyhow!("Game not yet implemented").into()),
         }
