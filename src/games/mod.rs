@@ -214,7 +214,7 @@ pub fn determine_game(args_str: &str) -> GameName {
         Some(g) if (g == "samus.link" && game_url.path().contains("/seed")) => GameName::SMZ3,
         Some(g) if (g == "sm.samus.link" && game_url.path().contains("/seed")) => GameName::SMTotal,
         Some(g)
-            if (g == "randommetroidsolver.pythonanywhere.com"
+            if ((g == "randommetroidsolver.pythonanywhere.com" || g == "varia.run")
                 && game_url.path().contains("/customizer")) =>
         {
             GameName::SMVARIA
