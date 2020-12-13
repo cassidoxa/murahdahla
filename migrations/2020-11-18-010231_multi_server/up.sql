@@ -1,9 +1,3 @@
--- Dropping all the old tables and replacing with new ones
-
-DROP TABLE games;
-DROP TABLE leaderboard;
-DROP TABLE posts;
-
 CREATE TABLE servers(
     server_id BIGINT(20) UNSIGNED PRIMARY KEY,
     owner_id BIGINT(20) UNSIGNED NOT NULL,
