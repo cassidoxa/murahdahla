@@ -311,7 +311,7 @@ impl SaveParser for Z3rSram {
     fn game_finished(&self) -> bool {
         let slice = &self.0[..];
         let mut cur = Cursor::new(slice);
-        let finished = get_stat(&mut cur, 0x423, 8, 0).unwrap();
+        let finished = get_stat(&mut cur, 0x443, 8, 0).unwrap();
         match finished {
             1u64 => true,
             0u64 => false,

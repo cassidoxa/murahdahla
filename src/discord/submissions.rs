@@ -302,6 +302,10 @@ async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Resu
     // we've already checked that the msg has exactly one attachment
     let maybe_save: Vec<u8> = msg.attachments[0].download().await?;
     let save = get_save_boxed(&maybe_save, race.race_game)?;
+    match save.game_finished() {
+        true => (),
+        false => return Ok(()),
+    };
 
     // this can be cleaned up but i'd like to develop the z3r sram
     // reading crate into something better and more general purpose first
