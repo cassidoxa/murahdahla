@@ -376,11 +376,14 @@ pub async fn build_leaderboard(
     let mut count: u32 = 1;
     lb_string.push_str(format!("{}\n", leaderboard_header).as_str());
     leaderboard.iter().for_each(|s| {
-        if time_now - s.submission_datetime > Duration::seconds(21600i64) {
-            lb_string.push_str(format!("\n{}) {}", count, &s).as_str());
+        // we italicize more recent submissions, but only in the leaderboard channel
+        if (time_now - s.submission_datetime < Duration::seconds(21600i64))
+            && target == ChannelType::Leaderboard
+        {
+            lb_string.push_str(format!("\n{}) *{}*", count, &s).as_str());
             count += 1;
         } else {
-            lb_string.push_str(format!("\n{}) *{}*", count, &s).as_str());
+            lb_string.push_str(format!("\n{}) {}", count, &s).as_str());
             count += 1;
         }
     });

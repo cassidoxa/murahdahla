@@ -105,7 +105,7 @@ impl ChannelGroup {
     }
 }
 
-#[derive(Debug, Clone, Copy, FromSqlRow)]
+#[derive(Debug, Clone, Copy, PartialEq, FromSqlRow)]
 pub enum ChannelType {
     Submission,
     Leaderboard,

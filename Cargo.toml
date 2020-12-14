@@ -37,7 +37,7 @@ features = ["cache", "standard_framework", "rustls_backend"]
 [dependencies.tokio]
 version = "0.2"
 default-features = false
-features = ["macros", "rt-threaded", "signal"]
+features = ["macros"]
 
 [profile.release]
 opt-level = 3
