@@ -319,12 +319,12 @@ async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Resu
         }
         None => (),
     };
-
+    let time = save.get_igt()?;
     let submission = NewSubmission::default()
         .set_runner_id(msg.author.id)
         .set_race_id(race.race_id)
         .name(&msg.author.name)
-        .set_time(save.get_igt().ok())
+        .set_time(Some(time))
         .set_game_info(race.race_game, &collection_vec)?;
     let conn = get_connection(&ctx).await;
     diesel::insert_into(submissions)
