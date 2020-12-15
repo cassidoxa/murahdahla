@@ -14,15 +14,19 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct SMVARIAGame {
-    html: String,
-    selector: Selectors,
     url: String,
+    skill: String,
+    split: String,
+    area: bool,
+    boss: bool,
+    door_color: bool,
 }
 
 impl SMVARIAGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
         let url = args_str.to_string();
-        let html: String = get(&url).await?.text().await?;
+        let html_response: String = get(&url).await?.text().await?;
+        let html = Html::parse_fragment(&html_response);
 
         let select_err: &'static str = "Error creating selector for VARIA HTML parsing";
         let settings =
@@ -30,124 +34,96 @@ impl SMVARIAGame {
         let table = Selector::parse("table").map_err(|_| anyhow!(select_err))?;
         let tr = Selector::parse("tr").map_err(|_| anyhow!(select_err))?;
         let td = Selector::parse("td").map_err(|_| anyhow!(select_err))?;
-        let selector = Selectors {
-            settings,
-            table,
-            tr,
-            td,
+
+        let settings_fragment = html.select(&settings).next().unwrap();
+        let skill: String = settings_fragment
+            .select(&table)
+            .nth(1)
+            .unwrap()
+            .select(&tr)
+            .nth(0)
+            .unwrap()
+            .select(&td)
+            .nth(1)
+            .unwrap()
+            .inner_html();
+        let split: String = match settings_fragment
+            .select(&table)
+            .nth(2)
+            .unwrap()
+            .select(&tr)
+            .nth(1)
+            .unwrap()
+            .select(&td)
+            .nth(1)
+            .unwrap()
+            .inner_html()
+            .as_str()
+        {
+            "Major" => "Major/Minor".to_owned(),
+            "Full" => "Full".to_owned(),
+            "Chozo" => "Chozo".to_owned(),
+            _ => "Unknown Item Split".to_owned(),
+        };
+        let area: bool = match settings_fragment
+            .select(&table)
+            .nth(4)
+            .unwrap()
+            .select(&tr)
+            .nth(0)
+            .unwrap()
+            .select(&td)
+            .nth(1)
+            .unwrap()
+            .inner_html()
+            .as_str()
+        {
+            "on" => true,
+            _ => false,
+        };
+        let boss: bool = match settings_fragment
+            .select(&table)
+            .nth(4)
+            .unwrap()
+            .select(&tr)
+            .nth(5)
+            .unwrap()
+            .select(&td)
+            .nth(1)
+            .unwrap()
+            .inner_html()
+            .as_str()
+        {
+            "on" => true,
+            _ => false,
+        };
+        let door_color: bool = match settings_fragment
+            .select(&table)
+            .nth(4)
+            .unwrap()
+            .select(&tr)
+            .nth(3)
+            .unwrap()
+            .select(&td)
+            .nth(1)
+            .unwrap()
+            .inner_html()
+            .as_str()
+        {
+            "on" => true,
+            _ => false,
         };
 
         let game = SMVARIAGame {
-            html,
-            selector,
             url,
+            skill,
+            split,
+            area,
+            boss,
+            door_color,
         };
 
         Ok(game)
-    }
-
-    fn get_skill(&self) -> String {
-        // we store as a string and re-parse because Html is not sync
-        let html = Html::parse_fragment(&self.html);
-        let settings_fragment = html.select(&self.selector.settings).next().unwrap();
-        let skill: String = settings_fragment
-            .select(&self.selector.table)
-            .nth(1)
-            .unwrap()
-            .select(&self.selector.tr)
-            .nth(0)
-            .unwrap()
-            .select(&self.selector.td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-
-        skill
-    }
-
-    fn get_split(&self) -> String {
-        // we store as a string and re-parse because Html is not sync
-        let html = Html::parse_fragment(&self.html);
-        let settings_fragment = html.select(&self.selector.settings).next().unwrap();
-        let split: String = settings_fragment
-            .select(&self.selector.table)
-            .nth(2)
-            .unwrap()
-            .select(&self.selector.tr)
-            .nth(1)
-            .unwrap()
-            .select(&self.selector.td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-
-        split
-    }
-
-    fn get_area(&self) -> bool {
-        // we store as a string and re-parse because Html is not sync
-        let html = Html::parse_fragment(&self.html);
-        let settings_fragment = html.select(&self.selector.settings).next().unwrap();
-        let area: String = settings_fragment
-            .select(&self.selector.table)
-            .nth(4)
-            .unwrap()
-            .select(&self.selector.tr)
-            .nth(0)
-            .unwrap()
-            .select(&self.selector.td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-
-        match area.as_str() {
-            "on" => true,
-            _ => false,
-        }
-    }
-
-    fn get_boss(&self) -> bool {
-        // we store as a string and re-parse because Html is not sync
-        let html = Html::parse_fragment(&self.html);
-        let settings_fragment = html.select(&self.selector.settings).next().unwrap();
-        let boss: String = settings_fragment
-            .select(&self.selector.table)
-            .nth(4)
-            .unwrap()
-            .select(&self.selector.tr)
-            .nth(5)
-            .unwrap()
-            .select(&self.selector.td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-
-        match boss.as_str() {
-            "on" => true,
-            _ => false,
-        }
-    }
-
-    fn get_doors(&self) -> bool {
-        // we store as a string and re-parse because Html is not sync
-        let html = Html::parse_fragment(&self.html);
-        let settings_fragment = html.select(&self.selector.settings).next().unwrap();
-        let doors: String = settings_fragment
-            .select(&self.selector.table)
-            .nth(4)
-            .unwrap()
-            .select(&self.selector.tr)
-            .nth(3)
-            .unwrap()
-            .select(&self.selector.td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-
-        match doors.as_str() {
-            "on" => true,
-            _ => false,
-        }
     }
 }
 
@@ -178,23 +154,18 @@ impl AsyncGame for SMVARIAGame {
     }
 
     fn settings_str(&self) -> Result<String, BoxedError> {
-        let skill_preset: String = self.get_skill();
-        let split: &str = match self.get_split().as_str() {
-            "Major" => "Major/Minor",
-            "Full" => "Full",
-            "Chozo" => "Chozo",
-            _ => "Unknown Item Split",
-        };
+        let skill_preset: &str = &self.skill;
+        let split: &str = &self.split;
         let mut base_settings = format!("\"{}\" {}", skill_preset, split);
-        match self.get_area() {
+        match self.area {
             false => (),
             true => base_settings.push_str("Area Rando "),
         };
-        match self.get_boss() {
+        match self.boss {
             false => (),
             true => base_settings.push_str("Boss Rando "),
         };
-        match self.get_doors() {
+        match self.door_color {
             false => (),
             true => base_settings.push_str("Door Color Rando "),
         };
