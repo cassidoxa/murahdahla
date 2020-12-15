@@ -1,7 +1,7 @@
 use std::fmt;
 
 use anyhow::{anyhow, Result};
-use chrono::{offset::Utc, NaiveDate, NaiveTime};
+use chrono::{offset::Utc, NaiveDate};
 use diesel::{
     backend::Backend, deserialize, deserialize::FromSql, expression::AsExpression,
     helper_types::AsExprOf, prelude::*, sql_types::Text,
@@ -13,10 +13,11 @@ use crate::{
     discord::channel_groups::ChannelGroup,
     games::{
         other::OtherGame,
+        save_parsing::{SMZ3Sram, SaveParser, Z3rSram},
         smtotal::SMTotalGame,
         smvaria::SMVARIAGame,
         smz3::SMZ3Game,
-        z3r::{Z3rGame, Z3rSram},
+        z3r::Z3rGame,
     },
     helpers::*,
     schema::*,
@@ -24,6 +25,7 @@ use crate::{
 };
 
 pub mod other;
+mod save_parsing;
 pub mod smtotal;
 pub mod smvaria;
 pub mod smz3;
@@ -240,6 +242,7 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
 pub fn get_save_boxed(maybe_save: &Vec<u8>, game: GameName) -> Result<BoxedSave, BoxedError> {
     match game {
         GameName::ALTTPR => Ok(Box::new(Z3rSram::new_from_slice(maybe_save)?)),
+        GameName::SMZ3 => Ok(Box::new(SMZ3Sram::new_from_slice(maybe_save)?)),
         _ => Err(anyhow!("Received file for game that doesn't support save parsing").into()),
     }
 }
@@ -251,14 +254,6 @@ pub fn get_maybe_active_race(conn: &PooledConn, group: &ChannelGroup) -> Option<
         .filter(race_active.eq(true))
         .get_result(conn)
         .ok()
-}
-
-pub trait SaveParser {
-    fn game_finished(&self) -> bool;
-
-    fn get_igt(&self) -> Result<NaiveTime, BoxedError>;
-
-    fn get_collection_rate(&self) -> Option<u64>;
 }
 
 pub trait DataDisplay {

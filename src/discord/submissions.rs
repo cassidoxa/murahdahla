@@ -21,7 +21,7 @@ use crate::{
 };
 
 // list of games we've implemented parsing IGT from a file (probably SRAM) for
-const IGT_GAMES: [GameName; 1] = [GameName::ALTTPR];
+const IGT_GAMES: [GameName; 2] = [GameName::ALTTPR, GameName::SMZ3];
 
 // some strings we'll compare with to check if a user has forfeited
 const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
@@ -309,9 +309,9 @@ async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Resu
 
     // this can be cleaned up but i'd like to develop the z3r sram
     // reading crate into something better and more general purpose first
-    let mut collection_vec: Vec<&str> = Vec::with_capacity(1);
+    let mut collection_vec: Vec<&str> = Vec::with_capacity(2);
     let maybe_collection = save.get_collection_rate();
-    let mut maybe_collection_str = String::with_capacity(3);
+    let mut maybe_collection_str = String::with_capacity(4);
     match maybe_collection {
         Some(cr) => {
             maybe_collection_str.push_str(cr.to_string().as_str());
