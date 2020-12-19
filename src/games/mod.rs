@@ -13,7 +13,7 @@ use crate::{
     discord::channel_groups::ChannelGroup,
     games::{
         other::OtherGame,
-        save_parsing::{SMZ3Sram, SaveParser, Z3rSram},
+        save_parsing::{SMTotalSram, SMZ3Sram, SaveParser, Z3rSram},
         smtotal::SMTotalGame,
         smvaria::SMVARIAGame,
         smz3::SMZ3Game,
@@ -243,6 +243,7 @@ pub fn get_save_boxed(maybe_save: &Vec<u8>, game: GameName) -> Result<BoxedSave,
     match game {
         GameName::ALTTPR => Ok(Box::new(Z3rSram::new_from_slice(maybe_save)?)),
         GameName::SMZ3 => Ok(Box::new(SMZ3Sram::new_from_slice(maybe_save)?)),
+        GameName::SMTotal => Ok(Box::new(SMTotalSram::new_from_slice(maybe_save)?)),
         _ => Err(anyhow!("Received file for game that doesn't support save parsing").into()),
     }
 }

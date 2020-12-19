@@ -4,13 +4,14 @@ use anyhow::{anyhow, Result};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use chrono::naive::NaiveTime;
 
-use crate::helpers::{bitmask, BoxedError};
+use crate::helpers::BoxedError;
 
 const Z3_SM_SRAM_CHECKSUM: u16 = 0x55AA;
 const Z3R_ROM_NAMES: [&'static str; 2] = ["VT", "ER"];
 
 pub struct Z3rSram([u8; 32768]);
 pub struct SMZ3Sram([u8; 32768]);
+pub struct SMTotalSram([u8; 16384]);
 
 pub trait SaveParser {
     fn game_finished(&self) -> bool;
@@ -39,9 +40,9 @@ fn get_stat(
     Ok(value as u64)
 }
 
-fn new_z3r_time(cur: &mut Cursor<&[u8]>) -> String {
+fn new_32_le_time(cur: &mut Cursor<&[u8]>, pos: u64) -> String {
     let value: u32 = {
-        cur.set_position(0x423);
+        cur.set_position(pos);
         cur.read_u32::<LittleEndian>().unwrap()
     };
     let hours: u32 = value / (216000u32);
@@ -75,6 +76,27 @@ fn new_smz3_time(cur: &mut Cursor<&[u8]>) -> String {
 
     time
 }
+
+#[inline]
+pub fn bitmask(bits: u32) -> u32 {
+    (1u32 << bits) - 1u32
+}
+
+fn get_set_bits<T: Into<u32>>(n: T) -> u8 {
+    let mut value = n.into();
+    if value == 0 {
+        return 0;
+    }
+    let mut count: u8 = 0;
+    while value > 0 {
+        value &= value - 1;
+        count += 1;
+    }
+
+    // this is fine
+    count as u8
+}
+
 // most of this is copied from z3r sram parsing tool here:
 // https://github.com/cassidoxa/z3r-sramr/
 // but that is mostly designed to support the python bindings
@@ -139,7 +161,7 @@ impl SaveParser for Z3rSram {
         // .as_slice() exists but not stable yet
         let slice = &self.0[..];
         let mut cur = Cursor::new(slice);
-        let igt = new_z3r_time(&mut cur);
+        let igt = new_32_le_time(&mut cur, 0x423);
         let time = NaiveTime::parse_from_str(&igt, "%H:%M:%S")?;
 
         Ok(time)
@@ -159,8 +181,6 @@ impl SMZ3Sram {
         if s.len() != 32768 {
             return Err(anyhow!("Incorrect file size for SMZ3 SRAM").into());
         }
-        // i can't figure out how to use a ref to the actual attachment so let's
-        // just copy into a buffer here
         let mut buf = [0; 32768];
         buf.copy_from_slice(s);
 
@@ -208,5 +228,73 @@ impl SaveParser for SMZ3Sram {
         let collection = z3_collection + sm_collection;
 
         Some(collection)
+    }
+}
+
+impl SMTotalSram {
+    pub fn new_from_slice(s: &Vec<u8>) -> Result<SMTotalSram, BoxedError> {
+        if s.len() != 16384 {
+            return Err(anyhow!("Incorrect file size for SM Total SRAM").into());
+        }
+
+        let mut buf = [0; 16384];
+        buf.copy_from_slice(s);
+        let mut cur = Cursor::new(buf);
+
+        let expected_checksum: u16 = LittleEndian::read_u16(&buf[0x00..0x02]);
+        let mut checksum = 0u16;
+        cur.set_position(0x10);
+        while cur.position() < 0x65C {
+            let bytes = cur.read_u16::<LittleEndian>().unwrap();
+            checksum = checksum.overflowing_add(bytes).0;
+        }
+        match expected_checksum == checksum {
+            true => Ok(SMTotalSram(buf)),
+            false => Err(anyhow!("SM SRAM has invalid checksum").into()),
+        }
+    }
+}
+
+impl SaveParser for SMTotalSram {
+    fn game_finished(&self) -> bool {
+        let str_slice = &self.0[0x1FE0..0x1FEC];
+        match from_utf8(&str_slice) {
+            // i think this may be a weird side effect but it seems to work
+            // for now
+            Ok(s) if s == "supermetroid" => true,
+            _ => false,
+        }
+    }
+
+    fn get_igt(&self) -> Result<NaiveTime, BoxedError> {
+        let slice = &self.0[..];
+        let mut cur = Cursor::new(slice);
+        let igt = new_32_le_time(&mut cur, 0x1400);
+        let time = NaiveTime::parse_from_str(&igt, "%H:%M:%S")?;
+
+        Ok(time)
+    }
+
+    fn get_collection_rate(&self) -> Option<u64> {
+        let mut collection: u8 = 0;
+
+        // missiles
+        collection += (&self.0[0x36]) / 5;
+        // super missiles
+        collection += (&self.0[0x3A]) / 5;
+        // power bombs
+        collection += (&self.0[0x3E]) / 5;
+        // e-tanks
+        collection += ((&self.0[0x32]) + 1) / 100;
+        // reserve
+        collection += (&self.0[0x42]) / 100;
+        // items
+        let items: u16 = LittleEndian::read_u16(&self.0[0x12..0x15]);
+        collection += get_set_bits(items);
+        // beams
+        let beams: u16 = LittleEndian::read_u16(&self.0[0x16..0x18]);
+        collection += get_set_bits(beams);
+
+        Some(collection as u64)
     }
 }

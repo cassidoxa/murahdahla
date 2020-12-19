@@ -21,7 +21,7 @@ use crate::{
 };
 
 // list of games we've implemented parsing IGT from a file (probably SRAM) for
-const IGT_GAMES: [GameName; 2] = [GameName::ALTTPR, GameName::SMZ3];
+const IGT_GAMES: [GameName; 3] = [GameName::ALTTPR, GameName::SMZ3, GameName::SMTotal];
 
 // some strings we'll compare with to check if a user has forfeited
 const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
