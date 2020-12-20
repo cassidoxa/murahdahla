@@ -109,12 +109,17 @@ with another start command.
 
 # Supported Games and Submitting Times
 
-Currently the bot supports ALTTPR (alttpr.com ), SMZ3 (samus.link), and SM (Total's randomizer
-at sm.samus.link) permalinks. This means that if you start a race with a permalink
-from one of these sites, the bot will gather some information about the game to display
-in the submission channel and on the leaderboard. You can pass other URLs or information
-to the start commands and those will be displayed as provided as well, but the game will
-be listed as "Other."
+Currently the bot supports permalinks for: 
+* ALTTPR (alttpr.com )
+* SMZ3 (samus.link)
+* SM (total's randomizer at sm.samus.link)
+* SM VARIA (varia.run)
+
+This means that if you start a race with a permalink from one of these sites, the bot
+will gather some information about the game to display in the submission channel and on
+the leaderboard. You can pass other URLs or information (e.g. settings, flag strings,
+seeds, etc)to the start commands and those will be displayed as provided as well,
+but the game will be listed as "Other."
 
 Subissions will always have a time and may require a collection rate depending on game.
 If you're playing ALTTPR, for example, the bot requires a submission in the format
@@ -122,9 +127,11 @@ If you're playing ALTTPR, for example, the bot requires a submission in the form
 
 When using in-game time, the bot may be able to get information from a save file. Right
 now it mostly supports SNES randomizers so this will be an SRAM file with the extenstion
-.srm. Currently the bot only supports reading SRAM for ALTTPR, so if someone has the
-.srm file for a completed ALTTPR game, they can upload it into the submission channel
-and it will be treated the same as if they had entered a text submission.
+.srm. Currently the bot only supports save file submissions for:
+
+* ALTTPR
+* SMZ3
+* SMR (total)
 
 # Bot Commands
 
