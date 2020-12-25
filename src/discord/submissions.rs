@@ -304,7 +304,7 @@ async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Resu
     let save = get_save_boxed(&maybe_save, race.race_game)?;
     match save.game_finished() {
         true => (),
-        false => return Ok(()),
+        false => return Err(anyhow!("Received save submission with unfinished game").into()),
     };
 
     // this can be cleaned up but i'd like to develop the z3r sram
