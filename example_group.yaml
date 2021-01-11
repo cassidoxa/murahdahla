@@ -14,7 +14,7 @@ submission: "example-submission-channel"
 leaderboard: "example-leaderboard-channel"
 
 # Channel for discussing spoilers
-spoilers: "example-spoiler-chanel"
+spoiler: "example-spoiler-channel"
 
 # Role used to gate access to the spoilers channel
 spoiler_role: "example-role"

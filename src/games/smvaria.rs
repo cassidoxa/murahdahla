@@ -1,8 +1,8 @@
 use std::{convert::TryFrom, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use reqwest::get;
-use scraper::{Html, Selector};
+use reqwest;
+use serde_json::Value;
 
 use crate::{
     discord::submissions::NewSubmission,
@@ -11,120 +11,44 @@ use crate::{
 };
 
 // const BASE_URL: &'static str = "https://randommetroidsolver.pythonanywhere.com/customizer";
+const API_URL: &'static str = "https://variabeta.pythonanywhere.com/randoParamsWebServiceAPI";
 
 #[derive(Debug, Clone)]
 pub struct SMVARIAGame {
+    map: Value,
     url: String,
-    skill: String,
-    split: String,
-    area: bool,
-    boss: bool,
-    door_color: bool,
 }
 
 impl SMVARIAGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
+        let game_slug: &str = args_str.split("/").last().unwrap();
         let url = args_str.to_string();
-        let html_response: String = get(&url).await?.text().await?;
-        let html = Html::parse_fragment(&html_response);
-
-        let select_err: &'static str = "Error creating selector for VARIA HTML parsing";
-        let settings =
-            Selector::parse(r#"div[id="seedInfoVisibility"]"#).map_err(|_| anyhow!(select_err))?;
-        let table = Selector::parse("table").map_err(|_| anyhow!(select_err))?;
-        let tr = Selector::parse("tr").map_err(|_| anyhow!(select_err))?;
-        let td = Selector::parse("td").map_err(|_| anyhow!(select_err))?;
-
-        let settings_fragment = html.select(&settings).next().unwrap();
-        let skill: String = settings_fragment
-            .select(&table)
-            .nth(1)
-            .unwrap()
-            .select(&tr)
-            .nth(0)
-            .unwrap()
-            .select(&td)
-            .nth(1)
-            .unwrap()
-            .inner_html();
-        let split: String = match settings_fragment
-            .select(&table)
-            .nth(2)
-            .unwrap()
-            .select(&tr)
-            .nth(1)
-            .unwrap()
-            .select(&td)
-            .nth(1)
-            .unwrap()
-            .inner_html()
-            .as_str()
-        {
-            "Major" => "Major/Minor".to_owned(),
-            "Full" => "Full".to_owned(),
-            "Chozo" => "Chozo".to_owned(),
-            _ => "Unknown Item Split".to_owned(),
-        };
-        let area: bool = match settings_fragment
-            .select(&table)
-            .nth(4)
-            .unwrap()
-            .select(&tr)
-            .nth(0)
-            .unwrap()
-            .select(&td)
-            .nth(1)
-            .unwrap()
-            .inner_html()
-            .as_str()
-        {
-            "on" => true,
-            _ => false,
-        };
-        let boss: bool = match settings_fragment
-            .select(&table)
-            .nth(4)
-            .unwrap()
-            .select(&tr)
-            .nth(5)
-            .unwrap()
-            .select(&td)
-            .nth(1)
-            .unwrap()
-            .inner_html()
-            .as_str()
-        {
-            "on" => true,
-            _ => false,
-        };
-        let door_color: bool = match settings_fragment
-            .select(&table)
-            .nth(4)
-            .unwrap()
-            .select(&tr)
-            .nth(3)
-            .unwrap()
-            .select(&td)
-            .nth(1)
-            .unwrap()
-            .inner_html()
-            .as_str()
-        {
-            "on" => true,
-            _ => false,
-        };
-
-        let game = SMVARIAGame {
-            url,
-            skill,
-            split,
-            area,
-            boss,
-            door_color,
-        };
+        let map = get_seed(game_slug).await?;
+        let game = SMVARIAGame { map, url };
 
         Ok(game)
     }
+}
+
+async fn get_seed(slug: &str) -> Result<Value> {
+    let params = [("guid", &slug)];
+    let client = reqwest::Client::new();
+    let json_str: String = client
+        .post(API_URL)
+        .header("Content-Type", "application/json")
+        .form(&params)
+        .send()
+        .await?
+        .json::<Value>()
+        .await?
+        .as_str()
+        .ok_or_else(|| anyhow!("Error parsing VARIA API response as str"))?
+        .to_owned();
+
+    // feel like there's a better way but I couldn't figure this out
+    let seed = Value::from_str(&json_str)?;
+
+    Ok(seed)
 }
 
 pub struct SMVARIACollectionRate(u16);
@@ -154,20 +78,43 @@ impl AsyncGame for SMVARIAGame {
     }
 
     fn settings_str(&self) -> Result<String, BoxedError> {
-        let skill_preset: &str = &self.skill;
-        let split: &str = &self.split;
-        let mut base_settings = format!("\"{}\" {}", skill_preset, split);
-        match self.area {
-            false => (),
-            true => base_settings.push_str("Area Rando "),
+        let game_json = &self
+            .map
+            .as_object()
+            .ok_or_else(|| anyhow!("Error parsing sm.samus.link response as Object"))?;
+        let skill_preset = game_json["preset"]
+            .as_str()
+            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?;
+        let split: &str = match game_json["majorsSplit"]
+            .as_str()
+            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+        {
+            "Major" => "Major/Minor",
+            "Full" => "Full",
+            "Chozo" => "Chozo",
+            _ => "Unknown Item Split",
         };
-        match self.boss {
-            false => (),
-            true => base_settings.push_str("Boss Rando "),
+        let mut base_settings = format!("\"{}\" {} ", skill_preset, split);
+        match game_json["areaRandomization"]
+            .as_str()
+            .ok_or::<BoxedError>(anyhow!("Error parsing game state").into())?
+        {
+            "on" => base_settings.push_str("Area Rando "),
+            _ => (),
         };
-        match self.door_color {
-            false => (),
-            true => base_settings.push_str("Door Color Rando "),
+        match game_json["bossRandomization"]
+            .as_str()
+            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+        {
+            "on" => base_settings.push_str("Boss Rando "),
+            _ => (),
+        };
+        match game_json["doorsColorsRando"]
+            .as_str()
+            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+        {
+            "on" => base_settings.push_str("Door Color Rando "),
+            _ => (),
         };
 
         Ok(base_settings)
@@ -196,12 +143,4 @@ pub fn game_info<'a>(
     submission.set_collection(Some(collection));
 
     Ok(submission)
-}
-
-#[derive(Debug, Clone)]
-struct Selectors {
-    settings: Selector,
-    table: Selector,
-    tr: Selector,
-    td: Selector,
 }

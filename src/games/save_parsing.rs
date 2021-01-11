@@ -12,6 +12,7 @@ const Z3R_ROM_NAMES: [&'static str; 2] = ["VT", "ER"];
 pub struct Z3rSram([u8; 32768]);
 pub struct SMZ3Sram([u8; 32768]);
 pub struct SMTotalSram([u8; 16384]);
+pub struct SMVARIASram([u8; 8192]);
 
 pub trait SaveParser {
     fn game_finished(&self) -> bool;
@@ -256,6 +257,74 @@ impl SMTotalSram {
 }
 
 impl SaveParser for SMTotalSram {
+    fn game_finished(&self) -> bool {
+        let str_slice = &self.0[0x1FE0..0x1FEC];
+        match from_utf8(&str_slice) {
+            // i think this may be a weird side effect but it seems to work
+            // for now
+            Ok(s) if s == "supermetroid" => true,
+            _ => false,
+        }
+    }
+
+    fn get_igt(&self) -> Result<NaiveTime, BoxedError> {
+        let slice = &self.0[..];
+        let mut cur = Cursor::new(slice);
+        let igt = new_32_le_time(&mut cur, 0x1400);
+        let time = NaiveTime::parse_from_str(&igt, "%H:%M:%S")?;
+
+        Ok(time)
+    }
+
+    fn get_collection_rate(&self) -> Option<u64> {
+        let mut collection: u8 = 0;
+
+        // missiles
+        collection += (&self.0[0x36]) / 5;
+        // super missiles
+        collection += (&self.0[0x3A]) / 5;
+        // power bombs
+        collection += (&self.0[0x3E]) / 5;
+        // e-tanks
+        collection += ((&self.0[0x32]) + 1) / 100;
+        // reserve
+        collection += (&self.0[0x42]) / 100;
+        // items
+        let items: u16 = LittleEndian::read_u16(&self.0[0x12..0x15]);
+        collection += get_set_bits(items);
+        // beams
+        let beams: u16 = LittleEndian::read_u16(&self.0[0x16..0x18]);
+        collection += get_set_bits(beams);
+
+        Some(collection as u64)
+    }
+}
+
+impl SMVARIASram {
+    pub fn new_from_slice(s: &Vec<u8>) -> Result<SMVARIASram, BoxedError> {
+        if s.len() != 8192 {
+            return Err(anyhow!("Incorrect file size for SM VARIA SRAM").into());
+        }
+
+        let mut buf = [0; 8192];
+        buf.copy_from_slice(s);
+        let mut cur = Cursor::new(buf);
+
+        let expected_checksum: u16 = LittleEndian::read_u16(&buf[0x00..0x02]);
+        let mut checksum = 0u16;
+        cur.set_position(0x10);
+        while cur.position() < 0x65C {
+            let bytes = cur.read_u16::<LittleEndian>().unwrap();
+            checksum = checksum.overflowing_add(bytes).0;
+        }
+        match expected_checksum == checksum {
+            true => Ok(SMVARIASram(buf)),
+            false => Err(anyhow!("SM SRAM has invalid checksum").into()),
+        }
+    }
+}
+
+impl SaveParser for SMVARIASram {
     fn game_finished(&self) -> bool {
         let str_slice = &self.0[0x1FE0..0x1FEC];
         match from_utf8(&str_slice) {

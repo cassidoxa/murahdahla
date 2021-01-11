@@ -32,11 +32,11 @@ they can be installed via [rustup](https://rustup.rs) (the preferred method.)
 
 The bot uses a MySQL database on the backend
 
-### 3. libmysqlclient
+### 3. Mysql client and dev packages
 
-The diesel-cli tool requires this library to build. It should be available in your distro's
-repository. (Note: I'm 80% sure this is the correct library. You may need `libmysqlclient-dev`.
-If this is not the case or another library is required please let me know.)
+Diesel requires a MySQL client to run and diesel-cli requires the MySQL client dev packages
+to build. These should be available in your distro's repo and may be under the name "mariadb"
+instead of MySQL. On debian the required dev package is libmariadb-dev-compat.
 
 ### 4. diesel-cli
 
@@ -126,7 +126,7 @@ Currently the bot supports permalinks for:
 * ALTTPR (alttpr.com )
 * SMZ3 (samus.link)
 * SM (total's randomizer at sm.samus.link)
-* SM VARIA (varia.run)
+* SM VARIA (currently only supports seeds generated with variabeta.pythonanywhere.com domain)
 
 This means that if you start a race with a permalink from one of these sites, the bot
 will gather some information about the game to display in the submission channel and on
@@ -139,6 +139,7 @@ the following games when the race is timed by in-game time (IGT):
 * ALTTPR
 * SMZ3
 * SM Rando (total)
+* SM VARIA Rando
 
 ## Time Submissions and Arguments
 
