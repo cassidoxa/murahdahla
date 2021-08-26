@@ -46,7 +46,7 @@ fn new_32_le_time(cur: &mut Cursor<&[u8]>, pos: u64) -> String {
         cur.set_position(pos);
         cur.read_u32::<LittleEndian>().unwrap()
     };
-    let hours: u32 = value / (216000u32);
+    let hours: u32 = value / 216000u32;
     let mut rem = value % 216000u32;
     let minutes: u32 = rem / 3600u32;
     rem %= 3600u32;
@@ -98,12 +98,7 @@ fn get_set_bits<T: Into<u32>>(n: T) -> u8 {
     count as u8
 }
 
-// most of this is copied from z3r sram parsing tool here:
 // https://github.com/cassidoxa/z3r-sramr/
-// but that is mostly designed to support the python bindings
-// if/when i or someone else ever makes it into something more general
-// purpose it should be brought in as a dependency
-// but mostly we don't need a map with everything
 
 impl Z3rSram {
     pub fn new_from_slice(s: &Vec<u8>) -> Result<Z3rSram, BoxedError> {
@@ -162,7 +157,7 @@ impl SaveParser for Z3rSram {
         // .as_slice() exists but not stable yet
         let slice = &self.0[..];
         let mut cur = Cursor::new(slice);
-        let igt = new_32_le_time(&mut cur, 0x423);
+        let igt = new_32_le_time(&mut cur, 0x43E);
         let time = NaiveTime::parse_from_str(&igt, "%H:%M:%S")?;
 
         Ok(time)

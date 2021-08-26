@@ -338,6 +338,7 @@ async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Resu
     Ok(())
 }
 
+#[inline]
 fn igt_attachment_check(msg: &Message, race: &AsyncRaceData) -> bool {
     // checking if 1. the race is IGT 2. the game is one where we can read a save
     // 3. there is an attached file (hopefully a good save)

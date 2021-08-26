@@ -10,7 +10,7 @@ use crate::{
     helpers::BoxedError,
 };
 
-const BASE_URL: &'static str = "https://s3.us-east-2.amazonaws.com/alttpr-patches/";
+const BASE_URL: &'static str = "https://alttpr-patch-data.s3.us-east-2.amazonaws.com/";
 
 const fn code_map(value: u64) -> &'static str {
     match value {
@@ -195,7 +195,7 @@ impl AsyncGame for Z3rGame {
         game_string.push_str(
             format!(
                 "({}/{}/{}/{}/{})",
-                code[0], code[1], code[2], code[3], code[4]
+                code[2], code[3], code[4], code[5], code[6]
             )
             .as_str(),
         );
@@ -214,19 +214,18 @@ impl AsyncGame for Z3rGame {
 
 #[inline]
 fn get_code(patch: &Value) -> Result<Vec<&'static str>> {
-    // it's pretty safe to unwrap here unless the alttpr patch format
-    // changes suddenly and dramatically
+    // it's pretty safe to unwrap here
     let code: Vec<&'static str> = patch
         .as_array()
         .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
         .iter()
-        .find(|v| v.as_object().unwrap().contains_key("1573397"))
+        .find(|v| v.as_object().unwrap().contains_key("1573395"))
         .ok_or_else(|| anyhow!("Could not find code offset in ALTTPR patch"))?
-        .get("1573397")
+        .get("1573395")
         .unwrap()
         .as_array()
         .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
-        .iter() // now THATS what i call an iterator
+        .iter()
         .map(|x| code_map(x.as_u64().unwrap()))
         .collect();
 

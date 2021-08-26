@@ -1,6 +1,6 @@
 [package]
 name = "murahdahla"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["cassidoxa <cassidymoen@gmx.com>"]
 edition = "2018"
 
@@ -20,23 +20,23 @@ url = "2.2"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [dependencies.diesel]
-version = "1.4.5"
+version = "1.4.7"
 default-features = false
 features = ["mysql", "chrono", "r2d2"]
 
 [dependencies.reqwest]
-version = "0.10.10"
+version = "0.11.4"
 default-features = false
 features = ["rustls-tls", "json", "gzip"]
 
 [dependencies.serenity]
-version = "0.9.3"
+version = "0.10.9"
 features = ["cache", "standard_framework", "rustls_backend"]
 
 [dependencies.tokio]
-version = "0.2"
+version = "1.10"
 default-features = false
-features = ["macros"]
+features = ["macros", "rt-multi-thread"]
 
 [profile.release]
 opt-level = 3
@@ -45,5 +45,5 @@ rpath = false
 lto = true
 overflow-checks = false
 debug-assertions = false
-codegen-units = 2
+codegen-units = 1
 panic = "abort"
