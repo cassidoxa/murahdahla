@@ -2,7 +2,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use reqwest::get;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
     discord::submissions::NewSubmission,
@@ -11,6 +11,7 @@ use crate::{
 };
 
 const BASE_URL: &'static str = "https://alttpr-patch-data.s3.us-east-2.amazonaws.com/";
+const FILE_SELECT_CODE: u64 = 0x180215; // tables.asm: 1007
 
 const fn code_map(value: u64) -> &'static str {
     match value {
@@ -52,16 +53,23 @@ const fn code_map(value: u64) -> &'static str {
 
 #[derive(Debug, Clone)]
 pub struct Z3rGame {
-    map: Value,
+    meta: Value,
+    patches: Map<String, Value>,
     url: String,
 }
 
 impl Z3rGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
         let game_id = args_str.split("/").last().unwrap();
-        let map = get_patch(game_id).await?;
+        let mut meta = get_patch(game_id).await?;
         let url = args_str.to_string(); // we've already parsed this as a url and should know it's good
-        let game = Z3rGame { map: map, url: url };
+        let mut patch_json: Value = meta["patch"].take();
+        let patches = patch_to_map(&mut patch_json)?;
+        let game = Z3rGame {
+            meta: meta,
+            patches: patches,
+            url: url,
+        };
 
         Ok(game)
     }
@@ -102,13 +110,14 @@ impl AsyncGame for Z3rGame {
 
     fn settings_str(&self) -> Result<String, BoxedError> {
         // TODO: check for "special" here because we need to handle festives etc differently
-        let game_json = &self.map;
+        let game_json = &self.meta;
+        let game_patches = &self.patches;
         match game_json["spoiler"]["meta"]["spoilers"]
             .as_str()
             .ok_or::<BoxedError>(anyhow!("Error parsing spoiler meta information").into())
         {
             Ok("mystery") => {
-                let code: Vec<&str> = get_code(&game_json["patch"])?;
+                let code: Vec<&str> = get_code(game_patches)?;
                 return Ok(format!(
                     "Mystery ({}/{}/{}/{}/{})",
                     code[0], code[1], code[2], code[3], code[4]
@@ -143,7 +152,7 @@ impl AsyncGame for Z3rGame {
         let ganon_crystals = game_json["spoiler"]["meta"]["entry_crystals_ganon"]
             .as_str()
             .ok_or::<BoxedError>(anyhow!("Error parsing Ganon crystals").into())?;
-        let code: Vec<&str> = get_code(&game_json["patch"])?;
+        let code: Vec<&str> = get_code(game_patches)?;
 
         let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
             .as_str()
@@ -195,7 +204,7 @@ impl AsyncGame for Z3rGame {
         game_string.push_str(
             format!(
                 "({}/{}/{}/{}/{})",
-                code[2], code[3], code[4], code[5], code[6]
+                code[0], code[1], code[2], code[3], code[4]
             )
             .as_str(),
         );
@@ -213,23 +222,59 @@ impl AsyncGame for Z3rGame {
 }
 
 #[inline]
-fn get_code(patch: &Value) -> Result<Vec<&'static str>> {
-    // it's pretty safe to unwrap here
-    let code: Vec<&'static str> = patch
-        .as_array()
-        .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
-        .iter()
-        .find(|v| v.as_object().unwrap().contains_key("1573395"))
-        .ok_or_else(|| anyhow!("Could not find code offset in ALTTPR patch"))?
-        .get("1573395")
-        .unwrap()
-        .as_array()
-        .ok_or_else(|| anyhow!("Error parsing ALTTPR patch as vector"))?
-        .iter()
-        .map(|x| code_map(x.as_u64().unwrap()))
-        .collect();
+fn patch_to_map(patches: &mut Value) -> Result<Map<String, Value>> {
+    // Converts the ROM patch data to serde_json's Map type and discards the "outer"
+    // keys, giving us a map with offsets mapped to arrays of bytes.
+    let mut patch_map: Map<String, Value> = Map::with_capacity(450);
+    patches
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("Error parsing ALTTPR patches into vector"))?
+        .into_iter()
+        .map(|inner| inner.as_object_mut().unwrap())
+        .for_each(|m| {
+            let key: String = m.keys().last().unwrap().clone();
+            let value: Value = m.remove(&key).unwrap();
+            patch_map.insert(key, value);
+        });
 
-    Ok(code)
+    Ok(patch_map)
+}
+
+#[inline]
+fn get_code(patch_map: &Map<String, Value>) -> Result<Vec<&'static str>> {
+    let mut code_vec: Vec<&'static str> = Vec::with_capacity(5);
+    let index_int = patch_map
+        .keys()
+        .map(|s| s.parse::<u64>().unwrap())
+        .reduce(|a, b| {
+            if b == FILE_SELECT_CODE {
+                b
+            } else if (b > a) && (b < FILE_SELECT_CODE) {
+                b
+            } else {
+                a
+            }
+        })
+        .ok_or_else(|| anyhow!("Error finding file select code patch index"))?;
+    let index_string = index_int.to_string();
+    let patch_slice = patch_map[&index_string]
+        .as_array()
+        .ok_or_else(|| anyhow!("Error parsing file select code data"))?;
+    if patch_slice.len() < 5 {
+        return Ok(vec!["Bow", "Boomerang", "Hookshot", "Bombs", "Mushroom"]);
+    }
+    let mut code_offset = 0u64;
+    if index_int != FILE_SELECT_CODE {
+        code_offset = FILE_SELECT_CODE - index_int;
+    }
+    for i in 0..5 {
+        let code_byte = patch_slice[(i + code_offset) as usize]
+            .as_u64()
+            .ok_or_else(|| anyhow!("Error parsing code byte as integer"))?;
+        code_vec.push(code_map(code_byte));
+    }
+
+    Ok(code_vec)
 }
 
 pub fn game_info<'a>(
