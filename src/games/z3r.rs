@@ -260,12 +260,12 @@ fn get_code(patch_map: &Map<String, Value>) -> Result<Vec<&'static str>> {
     let patch_slice = patch_map[&index_string]
         .as_array()
         .ok_or_else(|| anyhow!("Error parsing file select code data"))?;
-    if patch_slice.len() < 5 {
-        return Ok(vec!["Bow", "Boomerang", "Hookshot", "Bombs", "Mushroom"]);
-    }
     let mut code_offset = 0u64;
     if index_int != FILE_SELECT_CODE {
         code_offset = FILE_SELECT_CODE - index_int;
+    }
+    if patch_slice.len() < (code_offset + 5) as usize {
+        return Ok(vec!["Bow", "Boomerang", "Hookshot", "Bombs", "Mushroom"]);
     }
     for i in 0..5 {
         let code_byte = patch_slice[(i + code_offset) as usize]
