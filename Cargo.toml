@@ -34,7 +34,7 @@ version = "0.10.9"
 features = ["cache", "standard_framework", "rustls_backend"]
 
 [dependencies.tokio]
-version = "1.10"
+version = "1.13"
 default-features = false
 features = ["macros", "rt-multi-thread"]
 
