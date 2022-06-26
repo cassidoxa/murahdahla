@@ -13,20 +13,10 @@ use crate::{
         channel_groups::{ChannelGroup, ChannelType},
         messages::BotMessage,
     },
-    games::{
-        get_save_boxed, smtotal, smvaria, smz3, z3r, AsyncRaceData, DataDisplay, GameName, RaceType,
-    },
+    games::{smtotal, smvaria, smz3, z3r, AsyncRaceData, DataDisplay, GameName},
     helpers::*,
     schema::*,
 };
-
-// list of games we've implemented parsing IGT from a file (probably SRAM) for
-const IGT_GAMES: [GameName; 4] = [
-    GameName::ALTTPR,
-    GameName::SMZ3,
-    GameName::SMTotal,
-    GameName::SMVARIA,
-];
 
 // some strings we'll compare with to check if a user has forfeited
 const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
@@ -204,9 +194,6 @@ pub async fn process_submission(
 ) -> Result<(), BoxedError> {
     use crate::schema::submissions::dsl::*;
 
-    // how we process this depends on game, IGT or RTA, and whether or not we have
-    // an attached save file we can parse for IGT. The purpose of this function is
-    // only to process then add a good submission to the database.
     // in some cases this will return Ok despite not successfully inserting a submission
     // ie when a submission is malformed. the submitter is expected to know and recognize
     // that the submission was malformed when their message is deleted and they dont
@@ -214,10 +201,7 @@ pub async fn process_submission(
     let conn = get_connection(&ctx).await;
     let mut maybe_submission_text: Vec<&str> =
         msg.content.as_str().trim_end().split_whitespace().collect();
-    let igt_check: bool = igt_attachment_check(&msg, &race);
-
-    // we need at least some text or an attachment here
-    if !(maybe_submission_text.len() >= 1 || igt_check) {
+    if !(maybe_submission_text.len() >= 1) {
         return Ok(());
     }
     // first check to see if the user has forfeited
@@ -225,18 +209,6 @@ pub async fn process_submission(
     // about panicking if there's no text
     if maybe_submission_text.len() >= 1 && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
         insert_forfeit(&ctx, &msg, &race).await?;
-        info!(
-            "Successfully entered submission for user \"{}\"",
-            &msg.author.name
-        );
-        return Ok(());
-    }
-    // if we have an attachment, an IGT game, and a game that we can read the save file
-    // of, we can try to do that
-    if igt_check {
-        // this can fail so if someone attaches a save let's assume they're not also
-        // writing their time etc and return if it does
-        insert_save(&ctx, &msg, &race).await?;
         info!(
             "Successfully entered submission for user \"{}\"",
             &msg.author.name
@@ -299,52 +271,6 @@ async fn insert_forfeit(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> R
         .execute(&conn)?;
 
     Ok(())
-}
-
-async fn insert_save(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Result<(), BoxedError> {
-    use crate::schema::submissions::dsl::*;
-
-    // we've already checked that the msg has exactly one attachment
-    let maybe_save: Vec<u8> = msg.attachments[0].download().await?;
-    let save = get_save_boxed(&maybe_save, race.race_game)?;
-    match save.game_finished() {
-        true => (),
-        false => return Err(anyhow!("Received save submission with unfinished game").into()),
-    };
-
-    // this can be cleaned up but i'd like to develop the z3r sram
-    // reading crate into something better and more general purpose first
-    let mut collection_vec: Vec<&str> = Vec::with_capacity(2);
-    let maybe_collection = save.get_collection_rate();
-    let mut maybe_collection_str = String::with_capacity(4);
-    match maybe_collection {
-        Some(cr) => {
-            maybe_collection_str.push_str(cr.to_string().as_str());
-            collection_vec.push(&maybe_collection_str);
-        }
-        None => (),
-    };
-    let time = save.get_igt()?;
-    let submission = NewSubmission::default()
-        .set_runner_id(msg.author.id)
-        .set_race_id(race.race_id)
-        .name(&msg.author.name)
-        .set_time(Some(time))
-        .set_game_info(race.race_game, &collection_vec)?;
-    let conn = get_connection(&ctx).await;
-    diesel::insert_into(submissions)
-        .values(submission)
-        .execute(&conn)?;
-    Ok(())
-}
-
-#[inline]
-fn igt_attachment_check(msg: &Message, race: &AsyncRaceData) -> bool {
-    // checking if 1. the race is IGT 2. the game is one where we can read a save
-    // 3. there is an attached file (hopefully a good save)
-    race.race_type == RaceType::IGT
-        && IGT_GAMES.iter().any(|&g| g == race.race_game)
-        && msg.attachments.len() == 1
 }
 
 pub async fn build_leaderboard(

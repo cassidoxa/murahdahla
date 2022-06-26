@@ -51,9 +51,8 @@ impl ChannelGroup {
             Err(e) => return Err(Box::new(e) as BoxedError),
         };
 
-        let server = msg.guild(&ctx).await.unwrap();
-        let submission_channel_id = match server.channel_id_from_name(&ctx, &yaml.submission).await
-        {
+        let server = msg.guild(&ctx).unwrap();
+        let submission_channel_id = match server.channel_id_from_name(&ctx, &yaml.submission) {
             Some(i) => i,
             None => {
                 return Err(anyhow!(
@@ -62,17 +61,16 @@ impl ChannelGroup {
                 .into())
             }
         };
-        let leaderboard_channel_id =
-            match server.channel_id_from_name(&ctx, &yaml.leaderboard).await {
-                Some(i) => i,
-                None => {
-                    return Err(anyhow!(
-                        "Could not get leaderboard channel id from name provided in yaml"
-                    )
-                    .into())
-                }
-            };
-        let spoiler_channel_id = match server.channel_id_from_name(&ctx, &yaml.spoiler).await {
+        let leaderboard_channel_id = match server.channel_id_from_name(&ctx, &yaml.leaderboard) {
+            Some(i) => i,
+            None => {
+                return Err(anyhow!(
+                    "Could not get leaderboard channel id from name provided in yaml"
+                )
+                .into())
+            }
+        };
+        let spoiler_channel_id = match server.channel_id_from_name(&ctx, &yaml.spoiler) {
             Some(i) => i,
             None => {
                 return Err(
@@ -175,7 +173,6 @@ async fn validate_new_group(
     ];
     let all_channels: HashSet<u64> = msg
         .guild(&ctx)
-        .await
         .unwrap()
         .channels
         .keys()

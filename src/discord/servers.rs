@@ -83,7 +83,7 @@ impl DiscordServer {
 
 pub async fn parse_role(ctx: &Context, msg: &Message, mut args: Args) -> Result<u64, BoxedError> {
     let role_name = args.single_quoted::<String>()?;
-    let guild = msg.guild(&ctx).await.unwrap();
+    let guild = msg.guild(&ctx).unwrap();
     let role_id: u64 = match guild.role_by_name(&role_name) {
         Some(r) => *r.id.as_u64(),
         None => return Err(anyhow!("Tried to set role that doesn't exist on server").into()),
@@ -109,7 +109,7 @@ pub fn get_servers(conn: &PooledConn) -> Result<HashMap<GuildId, DiscordServer>>
 }
 
 pub async fn check_permissions(ctx: &Context, msg: &Message, req: Permission) -> Result<()> {
-    let server: Guild = msg.guild(&ctx).await.unwrap();
+    let server: Guild = msg.guild(&ctx).unwrap();
     if server.owner_id == msg.author.id {
         return Ok(());
     }; // owner can do any command
@@ -139,7 +139,7 @@ pub async fn add_server(ctx: &Context, msg: &Message) -> Result<()> {
     let guild_id = msg.guild_id.unwrap();
     let new_server = DiscordServer {
         server_id: *guild_id.as_u64(),
-        owner_id: *msg.guild(&ctx).await.unwrap().owner_id.as_u64(),
+        owner_id: *msg.guild(&ctx).unwrap().owner_id.as_u64(),
         admin_role_id: None,
         mod_role_id: None,
     };

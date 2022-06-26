@@ -12,12 +12,7 @@ use url::Url;
 use crate::{
     discord::channel_groups::ChannelGroup,
     games::{
-        other::OtherGame,
-        save_parsing::{SMTotalSram, SMVARIASram, SMZ3Sram, SaveParser, Z3rSram},
-        smtotal::SMTotalGame,
-        smvaria::SMVARIAGame,
-        smz3::SMZ3Game,
-        z3r::Z3rGame,
+        other::OtherGame, smtotal::SMTotalGame, smvaria::SMVARIAGame, smz3::SMZ3Game, z3r::Z3rGame,
     },
     helpers::*,
     schema::*,
@@ -25,14 +20,12 @@ use crate::{
 };
 
 pub mod other;
-mod save_parsing;
 pub mod smtotal;
 pub mod smvaria;
 pub mod smz3;
 pub mod z3r;
 
 pub type BoxedGame = Box<dyn AsyncGame + Send + Sync>;
-pub type BoxedSave = Box<dyn SaveParser + Send + Sync + 'static>;
 
 #[derive(Debug, Queryable, Identifiable, Associations)]
 #[belongs_to(parent = "ChannelGroup", foreign_key = "channel_group_id")]
@@ -238,16 +231,6 @@ pub async fn get_game_boxed(args: &Args) -> Result<BoxedGame, BoxedError> {
         GameName::SMVARIA => Ok(Box::new(SMVARIAGame::new_from_str(args.rest()).await?)),
         GameName::Other => Ok(Box::new(OtherGame::new_from_str(args.rest())?)),
         _ => Err(anyhow!("Tried to start unknown game").into()),
-    }
-}
-
-pub fn get_save_boxed(maybe_save: &Vec<u8>, game: GameName) -> Result<BoxedSave, BoxedError> {
-    match game {
-        GameName::ALTTPR => Ok(Box::new(Z3rSram::new_from_slice(maybe_save)?)),
-        GameName::SMZ3 => Ok(Box::new(SMZ3Sram::new_from_slice(maybe_save)?)),
-        GameName::SMTotal => Ok(Box::new(SMTotalSram::new_from_slice(maybe_save)?)),
-        GameName::SMVARIA => Ok(Box::new(SMVARIASram::new_from_slice(maybe_save)?)),
-        _ => Err(anyhow!("Received file for game that doesn't support save parsing").into()),
     }
 }
 

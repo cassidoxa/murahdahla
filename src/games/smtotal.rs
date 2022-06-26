@@ -24,29 +24,19 @@ pub struct SMTotalGame {
 #[derive(Debug, Deserialize)]
 pub struct SMTotalSettings {
     logic: String,
-    #[serde(skip_deserializing)]
-    goal: String,
     placement: String,
-    #[serde(skip_deserializing)]
-    seed: String,
-    #[serde(skip_deserializing)]
-    race: String,
-    #[serde(skip_deserializing)]
-    gamemode: String,
-    #[serde(skip_deserializing)]
-    players: String,
 }
 
 impl Default for SMTotalSettings {
     fn default() -> Self {
         SMTotalSettings {
             logic: String::new(),
-            goal: String::new(),
+            //goal: String::new(),
             placement: String::new(),
-            seed: String::new(),
-            race: String::new(),
-            gamemode: String::new(),
-            players: String::new(),
+            //seed: String::new(),
+            //race: String::new(),
+            //gamemode: String::new(),
+            //players: String::new(),
         }
     }
 }
@@ -68,7 +58,7 @@ async fn get_seed(slug: &str) -> Result<Value> {
     let padded_slug = format!("{}==", slug);
     let guid_vec = base64::decode_config(padded_slug, base64::URL_SAFE)?;
     let guid = Uuid::from_slice(&guid_vec)?;
-    let guid_str = guid.to_simple().encode_lower(&mut buf);
+    let guid_str = guid.as_simple().encode_lower(&mut buf);
     let url = format!("{}{}", BASE_URL, guid_str);
     let seed = get(&url).await?.json().await?;
 

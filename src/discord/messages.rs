@@ -68,7 +68,7 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     // the only non-command messages we're interested in are time submissions from
     // non bot users
     if !in_submission_channel(&ctx, &msg).await
-        || (msg.author.id == { ctx.cache.current_user_id().await })
+        || (msg.author.id == { ctx.cache.current_user_id() })
     {
         return;
     }

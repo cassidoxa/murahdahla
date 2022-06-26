@@ -18,6 +18,7 @@ use crate::{
         commands::{after_hook, before_hook, GENERAL_GROUP},
         messages::{normal_message_hook, Handler},
         servers::get_servers,
+        MURAHDAHLA_INTENTS,
     },
     helpers::*,
 };
@@ -41,13 +42,11 @@ async fn main() -> anyhow::Result<()> {
         .bucket("startrace", |b| b.delay(2))
         .await;
 
-    let mut client = Client::builder(&token)
+    let mut client = Client::builder(&token, MURAHDAHLA_INTENTS)
         .framework(framework)
         .event_handler(Handler)
         .await
         .expect("Error creating client");
-    // theoretically we can avoid some http requests if we cache some messages here
-    client.cache_and_http.cache.set_max_messages(2).await;
 
     {
         let mut data = client.data.write().await;
