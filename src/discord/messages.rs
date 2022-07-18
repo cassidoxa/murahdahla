@@ -50,10 +50,10 @@ impl BotMessage {
         BotMessage {
             message_id: *msg.id.as_u64(),
             message_datetime: msg.timestamp.naive_utc(),
-            race_id: race_id,
-            server_id: server_id,
+            race_id,
+            server_id,
             channel_id: *msg.channel_id.as_u64(),
-            channel_type: channel_type,
+            channel_type,
         }
     }
 }
@@ -64,9 +64,7 @@ pub struct Handler;
 impl EventHandler for Handler {
     // we may not need an event handler since our hooks grab everything we need
     // but let's keep this around for now
-    async fn message(&self, _ctx: Context, _msg: Message) {
-        ()
-    }
+    async fn message(&self, _ctx: Context, _msg: Message) {}
 }
 
 #[hook]
@@ -74,13 +72,12 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
     use crate::schema::submissions::columns::runner_name;
     // the only non-command messages we're interested in are time submissions from
     // non bot users
-    if !in_submission_channel(&ctx, &msg).await
-        || (msg.author.id == { ctx.cache.current_user_id() })
+    if !in_submission_channel(ctx, msg).await || (msg.author.id == { ctx.cache.current_user_id() })
     {
         return;
     }
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
 
     let maybe_active_race: Option<AsyncRaceData> = get_maybe_active_race(&conn, &group);
@@ -89,7 +86,7 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
         None => {
             // if there's no active race we still want to delete messages and keep this
             // channel tidy before returning
-            let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
+            let _ = delete_sub_msg(ctx, msg).await.map_err(|e| warn!("{}", e));
             return;
         }
     };
@@ -102,41 +99,41 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
         .is_some()
     {
         info!("Duplicate submission from \"{}\"", &msg.author.name);
-        let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| info!("{}", e));
+        let _ = delete_sub_msg(ctx, msg).await.map_err(|e| info!("{}", e));
         return;
     }
 
     // here we parse a possible time submission. If we get a good submission, insert
     // it into the database and we'll call a function to refresh the leaderboard from the
     // db below
-    let submission: NewSubmission = match process_submission(&msg, &race) {
+    let submission: NewSubmission = match process_submission(msg, &race) {
         Ok(s) => s,
         Err(e) => {
-            let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
+            let _ = delete_sub_msg(ctx, msg).await.map_err(|e| warn!("{}", e));
             warn!("Error processing submission: {}", e);
-            message_maintenance_user(&ctx, e).await;
+            message_maintenance_user(ctx, e).await;
             return;
         }
     };
 
-    let role_fut = add_spoiler_role(&ctx, &msg, group.spoiler_role_id);
-    let _ = match write_submission_add_role(&ctx, &submission, role_fut).await {
+    let role_fut = add_spoiler_role(ctx, msg, group.spoiler_role_id);
+    match write_submission_add_role(ctx, &submission, role_fut).await {
         Ok(_) => (),
         Err(e) => {
             warn!("Error finalizing submission: {}", e);
-            message_maintenance_user(&ctx, e).await
+            message_maintenance_user(ctx, e).await
         }
     };
 
     // refresh leaderboard from db
-    let lb_fut = build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard);
-    let delete_fut = delete_sub_msg(&ctx, &msg);
+    let lb_fut = build_leaderboard(ctx, &group, &race, ChannelType::Leaderboard);
+    let delete_fut = delete_sub_msg(ctx, msg);
 
     match try_join!(lb_fut, delete_fut) {
         Ok(_) => (),
         Err(e) => {
             warn!("Error during post-submission: {}", e);
-            message_maintenance_user(&ctx, e).await;
+            message_maintenance_user(ctx, e).await;
             return;
         }
     };
@@ -188,7 +185,7 @@ pub async fn handle_new_race_messages(
         sub_channel.say(&ctx, &base_game_string)
     )?;
 
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     let new_messages = vec![
         BotMessage::from_serenity_msg(
             &sub_message,
@@ -232,22 +229,22 @@ async fn delete_sub_msg(ctx: &Context, msg: &Message) -> Result<(), BoxedError> 
     }
 }
 
-pub async fn message_maintenance_user<T: std::fmt::Display>(ctx: &Context, msg: T) -> () {
-    let recipient = match UserId::from(*MAINTENANCE_USER.get().unwrap())
-        .to_user(&ctx)
-        .await
-    {
+pub async fn message_maintenance_user<T: std::fmt::Display>(ctx: &Context, msg: T) {
+    let user_id_int: u64 = *MAINTENANCE_USER.get().unwrap();
+    if user_id_int == 0 {
+        return;
+    }
+    let recipient = match UserId::from(user_id_int).to_user(&ctx).await {
         Ok(r) => r,
         Err(e) => {
             error!("Error messaging maintenance user: {}", e);
             return;
         }
     };
-    let _ = match recipient.direct_message(&ctx, |m| m.content(&msg)).await {
+    match recipient.direct_message(&ctx, |m| m.content(&msg)).await {
         Ok(_) => (),
         Err(e) => {
             error!("Error messaging maintenance user: {}", e);
-            return;
         }
     };
 }

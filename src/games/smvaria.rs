@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, str::FromStr};
+use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use reqwest;
@@ -11,7 +11,7 @@ use crate::{
 };
 
 // const BASE_URL: &'static str = "https://randommetroidsolver.pythonanywhere.com/customizer";
-const API_URL: &'static str = "https://variabeta.pythonanywhere.com/randoParamsWebServiceAPI";
+const API_URL: &str = "https://variabeta.pythonanywhere.com/randoParamsWebServiceAPI";
 
 #[derive(Debug, Clone)]
 pub struct SMVARIAGame {
@@ -21,7 +21,7 @@ pub struct SMVARIAGame {
 
 impl SMVARIAGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        let game_slug: &str = args_str.split("/").last().unwrap();
+        let game_slug: &str = args_str.split('/').last().unwrap();
         let url = args_str.to_string();
         let map = get_seed(game_slug).await?;
         let game = SMVARIAGame { map, url };
@@ -65,10 +65,9 @@ impl TryFrom<u16> for SMVARIACollectionRate {
     }
 }
 
-// we implement Into here because this only works one way
-impl Into<u16> for SMVARIACollectionRate {
-    fn into(self) -> u16 {
-        self.0
+impl From<SMVARIACollectionRate> for u16 {
+    fn from(c: SMVARIACollectionRate) -> Self {
+        c.0
     }
 }
 
@@ -84,10 +83,10 @@ impl AsyncGame for SMVARIAGame {
             .ok_or_else(|| anyhow!("Error parsing sm.samus.link response as Object"))?;
         let skill_preset = game_json["preset"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?;
+            .ok_or_else(|| anyhow!("Error parsing VARIA response"))?;
         let split: &str = match game_json["majorsSplit"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+            .ok_or_else(|| anyhow!("Error parsing VARIA response"))?
         {
             "Major" => "Major/Minor",
             "Full" => "Full",
@@ -95,27 +94,27 @@ impl AsyncGame for SMVARIAGame {
             _ => "Unknown Item Split",
         };
         let mut base_settings = format!("\"{}\" {} ", skill_preset, split);
-        match game_json["areaRandomization"]
+        if game_json["areaRandomization"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing game state").into())?
+            .ok_or_else(|| anyhow!("Error parsing game state"))?
+            == "on"
         {
-            "on" => base_settings.push_str("Area Rando "),
-            _ => (),
-        };
-        match game_json["bossRandomization"]
+            base_settings.push_str("Area Rando ")
+        }
+        if game_json["bossRandomization"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+            .ok_or_else(|| anyhow!("Error parsing VARIA response"))?
+            == "on"
         {
-            "on" => base_settings.push_str("Boss Rando "),
-            _ => (),
-        };
-        match game_json["doorsColorsRando"]
+            base_settings.push_str("Boss Rando ")
+        }
+        if game_json["doorsColorsRando"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing VARIA response").into())?
+            .ok_or_else(|| anyhow!("Error parsing VARIA response"))?
+            == "on"
         {
-            "on" => base_settings.push_str("Door Color Rando "),
-            _ => (),
-        };
+            base_settings.push_str("Door Color Rando ")
+        }
 
         Ok(base_settings)
     }
@@ -124,7 +123,7 @@ impl AsyncGame for SMVARIAGame {
         true
     }
 
-    fn game_url<'a>(&'a self) -> Option<&'a str> {
+    fn game_url(&self) -> Option<&str> {
         Some(&self.url)
     }
 }
@@ -138,7 +137,7 @@ pub fn game_info<'a>(
         return Err(anyhow!("SM VARIA submission did not include collection rate.").into());
     }
 
-    let number = u16::from_str(&msg[0])?;
+    let number = u16::from_str(msg[0])?;
     let collection = SMVARIACollectionRate::try_from(number)?;
     submission.set_collection(Some(collection));
 

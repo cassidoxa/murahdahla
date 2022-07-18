@@ -97,7 +97,7 @@ impl ChannelGroup {
             spoiler: *spoiler_channel_id.as_u64(),
             spoiler_role_id: *spoiler_role_id.as_u64(),
         };
-        validate_new_group(&ctx, &msg, &new_group, &yaml.spoiler_role).await?;
+        validate_new_group(ctx, msg, &new_group, &yaml.spoiler_role).await?;
 
         Ok(new_group)
     }

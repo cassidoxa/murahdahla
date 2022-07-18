@@ -57,23 +57,22 @@ pub struct NewAsyncRaceData {
 impl NewAsyncRaceData {
     pub fn new_from_game(
         game: &BoxedGame,
-        group_id: &Vec<u8>,
+        group_id: &[u8],
         race_type: RaceType,
     ) -> Result<Self, BoxedError> {
         let todays_date = Utc::today().naive_utc();
         let settings_string = game.settings_str()?;
-        let maybe_url: Option<String>;
-        match game.has_url() {
-            true => maybe_url = Some(game.game_url().unwrap().to_owned()),
-            false => maybe_url = None,
+        let maybe_url: Option<String> = match game.has_url() {
+            true => Some(game.game_url().unwrap().to_owned()),
+            false => None,
         };
 
         Ok(NewAsyncRaceData {
-            channel_group_id: group_id.clone(),
+            channel_group_id: group_id.to_vec(),
             race_active: true,
             race_date: todays_date,
             race_game: game.game_name(),
-            race_type: race_type,
+            race_type,
             race_info: settings_string,
             race_url: maybe_url,
         })
@@ -193,7 +192,7 @@ pub trait AsyncGame {
     fn has_url(&self) -> bool;
 
     // return game url if it exists
-    fn game_url<'a>(&'a self) -> Option<&'a str>;
+    fn game_url(&self) -> Option<&str>;
 }
 
 pub fn determine_game(args_str: &str) -> GameName {

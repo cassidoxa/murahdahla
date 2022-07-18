@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, default::Default, str::FromStr};
+use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use base64;
@@ -13,7 +13,7 @@ use crate::{
     helpers::BoxedError,
 };
 
-const BASE_URL: &'static str = "https://sm.samus.link/api/seed/";
+const BASE_URL: &str = "https://sm.samus.link/api/seed/";
 
 #[derive(Debug, Clone)]
 pub struct SMTotalGame {
@@ -21,32 +21,18 @@ pub struct SMTotalGame {
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct SMTotalSettings {
     logic: String,
     placement: String,
 }
 
-impl Default for SMTotalSettings {
-    fn default() -> Self {
-        SMTotalSettings {
-            logic: String::new(),
-            //goal: String::new(),
-            placement: String::new(),
-            //seed: String::new(),
-            //race: String::new(),
-            //gamemode: String::new(),
-            //players: String::new(),
-        }
-    }
-}
-
 impl SMTotalGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        let game_slug: &str = args_str.split("/").last().unwrap();
+        let game_slug: &str = args_str.split('/').last().unwrap();
         let map = get_seed(game_slug).await?;
         let url = args_str.to_string(); // we've already parsed this as a url and should know it's good
-        let game = SMTotalGame { map: map, url: url };
+        let game = SMTotalGame { map, url };
 
         Ok(game)
     }
@@ -79,10 +65,9 @@ impl TryFrom<u16> for SMTotalCollectionRate {
     }
 }
 
-// we implement Into here because this only works one way
-impl Into<u16> for SMTotalCollectionRate {
-    fn into(self) -> u16 {
-        self.0
+impl From<SMTotalCollectionRate> for u16 {
+    fn from(c: SMTotalCollectionRate) -> u16 {
+        c.0
     }
 }
 
@@ -125,7 +110,7 @@ impl AsyncGame for SMTotalGame {
 
         let code = &self.map["hash"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing goal").into())?;
+            .ok_or_else(|| anyhow!("Error parsing goal"))?;
 
         let game_string: String = format!("{} {} ({}) ", logic, placement, code);
 
@@ -136,7 +121,7 @@ impl AsyncGame for SMTotalGame {
         true
     }
 
-    fn game_url<'a>(&'a self) -> Option<&'a str> {
+    fn game_url(&self) -> Option<&str> {
         Some(&self.url)
     }
 }
@@ -150,7 +135,7 @@ pub fn game_info<'a>(
         return Err(anyhow!("SM (Total) submission did not include collection rate.").into());
     }
 
-    let number = u16::from_str(&msg[0])?;
+    let number = u16::from_str(msg[0])?;
     let collection = SMTotalCollectionRate::try_from(number)?;
     submission.set_collection(Some(collection));
 

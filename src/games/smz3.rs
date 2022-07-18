@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, default::Default, str::FromStr};
+use std::{default::Default, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use base64;
@@ -13,7 +13,7 @@ use crate::{
     helpers::BoxedError,
 };
 
-const BASE_URL: &'static str = "https://samus.link/api/seed/";
+const BASE_URL: &str = "https://samus.link/api/seed/";
 
 #[derive(Debug, Clone)]
 pub struct SMZ3Game {
@@ -21,34 +21,34 @@ pub struct SMZ3Game {
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct SMZ3Settings {
     smlogic: String,
     swordlocation: String,
     morphlocation: String,
 }
 
-impl Default for SMZ3Settings {
-    fn default() -> Self {
-        SMZ3Settings {
-            smlogic: String::new(),
-            //goal: String::new(),
-            swordlocation: String::new(),
-            morphlocation: String::new(),
-            //seed: String::new(),
-            //race: String::new(),
-            //gamemode: String::new(),
-            //players: String::new(),
-        }
-    }
-}
+// impl Default for SMZ3Settings {
+//     fn default() -> Self {
+//         SMZ3Settings {
+//             smlogic: String::new(),
+//             //goal: String::new(),
+//             swordlocation: String::new(),
+//             morphlocation: String::new(),
+//             //seed: String::new(),
+//             //race: String::new(),
+//             //gamemode: String::new(),
+//             //players: String::new(),
+//         }
+//     }
+// }
 
 impl SMZ3Game {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        let game_slug: &str = args_str.split("/").last().unwrap();
+        let game_slug: &str = args_str.split('/').last().unwrap();
         let map = get_seed(game_slug).await?;
         let url = args_str.to_string(); // we've already parsed this as a url and should know it's good
-        let game = SMZ3Game { map: map, url: url };
+        let game = SMZ3Game { map, url };
 
         Ok(game)
     }
@@ -81,10 +81,9 @@ impl TryFrom<u16> for SMZ3CollectionRate {
     }
 }
 
-// we implement Into here because this only works one way
-impl Into<u16> for SMZ3CollectionRate {
-    fn into(self) -> u16 {
-        self.0
+impl From<SMZ3CollectionRate> for u16 {
+    fn from(c: SMZ3CollectionRate) -> Self {
+        c.0
     }
 }
 
@@ -131,7 +130,7 @@ impl AsyncGame for SMZ3Game {
         };
         let code = &self.map["hash"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing goal").into())?;
+            .ok_or_else(|| anyhow!("Error parsing goal"))?;
 
         let game_string: String = format!("{} {} {} ({}) ", sm_logic, morph, sword, code);
 
@@ -142,7 +141,7 @@ impl AsyncGame for SMZ3Game {
         true
     }
 
-    fn game_url<'a>(&'a self) -> Option<&'a str> {
+    fn game_url(&self) -> Option<&str> {
         Some(&self.url)
     }
 }
@@ -156,7 +155,7 @@ pub fn game_info<'a>(
         return Err(anyhow!("SMZ3 submission did not include collection rate.").into());
     }
 
-    let number = u16::from_str(&msg[0])?;
+    let number = u16::from_str(msg[0])?;
     let collection = SMZ3CollectionRate::try_from(number)?;
     submission.set_collection(Some(collection));
 

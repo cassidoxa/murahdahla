@@ -36,7 +36,7 @@ impl AsyncGame for OtherGame {
         false
     }
 
-    fn game_url<'a>(&'a self) -> Option<&'a str> {
+    fn game_url(&self) -> Option<&str> {
         None
     }
 }

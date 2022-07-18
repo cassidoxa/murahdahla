@@ -10,7 +10,7 @@ use crate::{
     helpers::BoxedError,
 };
 
-const BASE_URL: &'static str = "https://alttpr-patch-data.s3.us-east-2.amazonaws.com/";
+const BASE_URL: &str = "https://alttpr-patch-data.s3.us-east-2.amazonaws.com/";
 const FILE_SELECT_CODE: u64 = 0x180215; // tables.asm: 1007
 
 const fn code_map(value: u64) -> &'static str {
@@ -60,16 +60,12 @@ pub struct Z3rGame {
 
 impl Z3rGame {
     pub async fn new_from_str(args_str: &str) -> Result<Self, BoxedError> {
-        let game_id = args_str.split("/").last().unwrap();
+        let game_id = args_str.split('/').last().unwrap();
         let mut meta = get_patch(game_id).await?;
         let url = args_str.to_string(); // we've already parsed this as a url and should know it's good
         let mut patch_json: Value = meta["patch"].take();
         let patches = patch_to_map(&mut patch_json)?;
-        let game = Z3rGame {
-            meta: meta,
-            patches: patches,
-            url: url,
-        };
+        let game = Z3rGame { meta, patches, url };
 
         Ok(game)
     }
@@ -96,10 +92,9 @@ impl TryFrom<u16> for Z3rCollectionRate {
     }
 }
 
-// we implement Into here because this only works one way
-impl Into<u16> for Z3rCollectionRate {
-    fn into(self) -> u16 {
-        self.0
+impl From<Z3rCollectionRate> for u16 {
+    fn from(c: Z3rCollectionRate) -> Self {
+        c.0
     }
 }
 
@@ -112,22 +107,19 @@ impl AsyncGame for Z3rGame {
         // TODO: check for "special" here because we need to handle festives etc differently
         let game_json = &self.meta;
         let game_patches = &self.patches;
-        match game_json["spoiler"]["meta"]["spoilers"]
+        if let Ok("mystery") = game_json["spoiler"]["meta"]["spoilers"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing spoiler meta information").into())
+            .ok_or_else(|| anyhow!("Error parsing spoiler meta information"))
         {
-            Ok("mystery") => {
-                let code: Vec<&str> = get_code(game_patches)?;
-                return Ok(format!(
-                    "Mystery ({}/{}/{}/{}/{})",
-                    code[0], code[1], code[2], code[3], code[4]
-                ));
-            }
-            _ => (),
-        }
+            let code: Vec<&str> = get_code(game_patches)?;
+            return Ok(format!(
+                "Mystery ({}/{}/{}/{}/{})",
+                code[0], code[1], code[2], code[3], code[4]
+            ));
+        };
         let state = match game_json["spoiler"]["meta"]["mode"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing game state").into())?
+            .ok_or_else(|| anyhow!("Error parsing game state"))?
         {
             "open" => "Open",
             "standard" => "Standard",
@@ -137,7 +129,7 @@ impl AsyncGame for Z3rGame {
         };
         let goal = match game_json["spoiler"]["meta"]["goal"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing goal").into())?
+            .ok_or_else(|| anyhow!("Error parsing goal"))?
         {
             "ganon" => "Defeat Ganon",
             "fast_ganon" => "Fast Ganon",
@@ -148,17 +140,16 @@ impl AsyncGame for Z3rGame {
         };
         let gt_crystals = game_json["spoiler"]["meta"]["entry_crystals_tower"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing GT crystals").into())?;
+            .ok_or_else(|| anyhow!("Error parsing GT crystals"))?;
         let ganon_crystals = game_json["spoiler"]["meta"]["entry_crystals_ganon"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing Ganon crystals").into())?;
+            .ok_or_else(|| anyhow!("Error parsing Ganon crystals"))?;
         let code: Vec<&str> = get_code(game_patches)?;
 
         let dungeon_items = match game_json["spoiler"]["meta"]["dungeon_items"]
             .as_str()
-            .ok_or::<BoxedError>(
-            anyhow!("Error parsing dungeon item shuffle").into(),
-        )? {
+            .ok_or_else(|| anyhow!("Error parsing dungeon item shuffle"))?
+        {
             "standard" => "Standard ",
             "mc" => "MC ",
             "mcs" => "MCS ",
@@ -169,7 +160,7 @@ impl AsyncGame for Z3rGame {
         if game_json["spoiler"]["meta"].get("shuffle") != None {
             shuffle = match game_json["spoiler"]["meta"]["shuffle"]
                 .as_str()
-                .ok_or::<BoxedError>(anyhow!("Error parsing entrance shuffle").into())?
+                .ok_or_else(|| anyhow!("Error parsing entrance shuffle"))?
             {
                 "simple" => "Simple Shuffle ",
                 "restricted" => "Restricted Shuffle ",
@@ -181,7 +172,7 @@ impl AsyncGame for Z3rGame {
         }
         let logic = match game_json["spoiler"]["meta"]["logic"]
             .as_str()
-            .ok_or::<BoxedError>(anyhow!("Error parsing logic").into())?
+            .ok_or_else(|| anyhow!("Error parsing logic"))?
         {
             "NoGlitches" => "No Glitches ",
             "OverworldGlitches" => "Overworld Glitches ",
@@ -216,7 +207,7 @@ impl AsyncGame for Z3rGame {
         true
     }
 
-    fn game_url<'a>(&'a self) -> Option<&'a str> {
+    fn game_url(&self) -> Option<&str> {
         Some(&self.url)
     }
 }
@@ -229,7 +220,7 @@ fn patch_to_map(patches: &mut Value) -> Result<Map<String, Value>> {
     patches
         .as_array_mut()
         .ok_or_else(|| anyhow!("Error parsing ALTTPR patches into vector"))?
-        .into_iter()
+        .iter_mut()
         .map(|inner| inner.as_object_mut().unwrap())
         .for_each(|m| {
             let key: String = m.keys().last().unwrap().clone();
@@ -289,7 +280,7 @@ pub fn game_info<'a>(
         return Err(anyhow!("ALTTPR submission did not include collection rate.").into());
     }
 
-    let number = u16::from_str(&msg[0])?;
+    let number = u16::from_str(msg[0])?;
     let collection = Z3rCollectionRate::try_from(number)?;
     submission.set_collection(Some(collection));
 

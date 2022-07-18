@@ -48,10 +48,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut client = Client::builder(&token, intents())
         .framework(framework)
-        .cache_settings(|c| c.max_messages(30))
+        .cache_settings(|c| c.max_messages(50))
         .event_handler(Handler)
-        .await?;
-    //.expect("Error creating client");
+        .await
+        .expect("Error creating client");
 
     {
         let mut data = client.data.write().await;
@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         data.insert::<GroupContainer>(groups);
     }
 
-    if let Err(e) = client.start_autosharded().await {
+    if let Err(e) = client.start().await {
         error!("Client error: {:?}", e);
     }
 

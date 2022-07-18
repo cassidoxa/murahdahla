@@ -19,7 +19,7 @@ use crate::{
 };
 
 // some strings we'll compare with to check if a user has forfeited
-const FORFEIT: [&'static str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
+const FORFEIT: [&str; 4] = ["ff", "FF", "forfeit", "Forfeit"];
 
 #[derive(Debug, Insertable, Queryable, Identifiable, Associations)]
 #[belongs_to(parent = "AsyncRaceData", foreign_key = "race_id")]
@@ -119,28 +119,19 @@ impl NewSubmission {
     }
 
     pub fn set_collection<T: Into<u16>>(&mut self, cr: Option<T>) -> &mut Self {
-        self.runner_collection = match cr {
-            Some(cr) => Some(cr.into()),
-            None => None,
-        };
+        self.runner_collection = cr.map(|cr| cr.into());
 
         self
     }
 
     pub fn set_optional_number<T: Into<u32>>(&mut self, number: Option<T>) -> &mut Self {
-        self.option_number = match number {
-            Some(n) => Some(n.into()),
-            None => None,
-        };
+        self.option_number = number.map(|n| n.into());
 
         self
     }
 
     pub fn set_optional_text<T: Into<String>>(&mut self, text: Option<T>) -> &mut Self {
-        self.option_text = match text {
-            Some(t) => Some(t.into()),
-            None => None,
-        };
+        self.option_text = text.map(|t| t.into());
 
         self
     }
@@ -194,16 +185,16 @@ pub fn process_submission(
     // that the submission was malformed when their message is deleted and they dont
     // have access to the leaderboard and spoilers channel
 
-    let mut maybe_submission_text: Vec<&str> =
-        msg.content.as_str().trim_end().split_whitespace().collect();
-    if !(maybe_submission_text.len() >= 1) {
+    let mut maybe_submission_text: Vec<&str> = msg.content.as_str().split_whitespace().collect();
+    if maybe_submission_text.is_empty() {
         return Err(anyhow!("Received submission with no text.").into());
     }
     // first check to see if the user has forfeited
     // the length check here should short circuit so we don't have to worry
     // about panicking if there's no text
-    if maybe_submission_text.len() >= 1 && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
-        forfeit(&msg, &race)?;
+    if !maybe_submission_text.is_empty() && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
+        let ff_submission = forfeit(msg, race)?;
+        return Ok(ff_submission);
     }
 
     // lets start with a default submission struct and add in what can here. then we'll
@@ -213,12 +204,12 @@ pub fn process_submission(
 
     // remove backslashes because *some servers* use numbers as emotes
     // we are also REMOVING the first element of the vector here
-    let maybe_time: &str = &maybe_submission_text.remove(0).replace("\\", "");
-    let time = match parse_variable_time(&maybe_time) {
+    let maybe_time: &str = &maybe_submission_text.remove(0).replace('\\', "");
+    let time = match parse_variable_time(maybe_time) {
         Ok(t) => t,
         Err(e) => {
             return Err(anyhow!(
-                "Processing submission: Malformed time from user \"{}\": {} - {}",
+                "Malformed time from user \"{}\": {} - {}",
                 &msg.author.name,
                 &maybe_time,
                 e
@@ -232,7 +223,14 @@ pub fn process_submission(
         .set_race_id(race.race_id)
         .name(&msg.author.name)
         .set_time(Some(time))
-        .set_game_info(race.race_game, &maybe_submission_text)?;
+        .set_game_info(race.race_game, &maybe_submission_text)
+        .map_err(|e| {
+            anyhow!(
+                "Error processing submission for {}: {}",
+                &msg.author.name,
+                e
+            )
+        })?;
 
     Ok(submission)
 }
@@ -271,7 +269,7 @@ pub async fn build_leaderboard(
         ChannelType::Submission => group.submission,
         _ => return Err(anyhow!("Did not specify a target channel to put leaderboard in").into()),
     };
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     // collect a vector of submissions for this race and sort it
     let mut leaderboard: Vec<Submission> = Submission::belonging_to(race)
         .filter(runner_forfeit.eq(false))
@@ -307,10 +305,10 @@ pub async fn build_leaderboard(
     });
 
     fill_leaderboard(
-        &ctx,
+        ctx,
         &mut lb_posts_data,
         &lb_string,
-        &group,
+        group,
         target,
         target_channel_id,
     )
@@ -330,7 +328,7 @@ async fn fill_leaderboard(
     let necessary_posts: usize = lb_string.len() / 2000 + 1;
     if necessary_posts > lb_posts_data.len() {
         lb_posts_data = resize_leaderboard(
-            &ctx,
+            ctx,
             group.server_id,
             target,
             target_channel_id,
@@ -340,9 +338,9 @@ async fn fill_leaderboard(
     }
     // fill buffer then send the post until there's no more
     let mut post_buffer = String::with_capacity(2000);
-    let mut post_iterator = lb_posts_data.into_iter().peekable();
+    let mut post_iterator = lb_posts_data.iter_mut().peekable();
     let mut submission_iterator = lb_string
-        .split("\n")
+        .split('\n')
         .collect::<Vec<&str>>()
         .into_iter()
         .peekable();
@@ -354,7 +352,7 @@ async fn fill_leaderboard(
 
         match submission_iterator.peek() {
             Some(line) => {
-                if line.len() + &post_buffer.len() <= 2000 {
+                if line.len() + post_buffer.len() <= 2000 {
                     post_buffer
                         .push_str(format!("\n{}", submission_iterator.next().unwrap()).as_str())
                 } else if line.len() + post_buffer.len() > 2000 {
@@ -389,7 +387,7 @@ async fn resize_leaderboard<'a>(
 ) -> Result<&'a mut Vec<BotMessage>, BoxedError> {
     use crate::schema::messages::dsl::*;
     // we only ever need one more post than we have to hold all submissions
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     let new_message: Message = ChannelId::from(target_channel_id)
         .say(&ctx, "Placeholder")
         .await?;
@@ -407,7 +405,7 @@ async fn resize_leaderboard<'a>(
 pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
     // technically NaiveTime represents a time of day but it works for our purposes
     let mut time_string = String::with_capacity(9);
-    let split_time = maybe_time.split(":");
+    let split_time = maybe_time.split(':');
     match split_time.count() {
         0 => return Err(anyhow!("Empty submission time")),
         1 => {
@@ -423,9 +421,8 @@ pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
         }
         _ => return Err(anyhow!("Tried to parse malformed time")),
     };
-    let time = NaiveTime::parse_from_str(&time_string, "%H:%M:%S").map_err(|e| anyhow!("{}", e));
 
-    time
+    NaiveTime::parse_from_str(&time_string, "%H:%M:%S").map_err(|e| anyhow!("{}", e))
 }
 
 pub async fn write_submission_add_role(
@@ -435,7 +432,7 @@ pub async fn write_submission_add_role(
 ) -> Result<(), BoxedError> {
     use crate::schema::submissions::dsl::*;
 
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     match role_fut.await {
         Ok(_) => (),
         Err(e) => return Err(anyhow!("Could not add role: {}", e).into()),

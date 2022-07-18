@@ -7,12 +7,12 @@ use serenity::{
     model::{
         channel::Message,
         guild::Guild,
-        id::{GuildId, RoleId},
+        id::{GuildId, RoleId, UserId},
     },
     prelude::*,
 };
 
-use crate::{helpers::*, schema::servers};
+use crate::{helpers::*, schema::servers, MAINTENANCE_USER};
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum Permission {
@@ -38,8 +38,8 @@ pub struct DiscordServer {
 }
 
 impl DiscordServer {
-    fn determine_user_permissions<T: Into<u64>>(self, id: T, roles: &Vec<RoleId>) -> Permission {
-        if &self.owner_id == &id.into() {
+    fn determine_user_permissions<T: Into<u64>>(self, id: T, roles: &[RoleId]) -> Permission {
+        if self.owner_id == id.into() {
             return Permission::Admin;
         };
         if self.admin_role_id.is_none() && self.mod_role_id.is_none() {
@@ -110,7 +110,8 @@ pub fn get_servers(conn: &PooledConn) -> Result<HashMap<GuildId, DiscordServer>>
 
 pub async fn check_permissions(ctx: &Context, msg: &Message, req: Permission) -> Result<()> {
     let server: Guild = msg.guild(&ctx).unwrap();
-    if server.owner_id == msg.author.id {
+    let maintenance_user_id = UserId::from(*MAINTENANCE_USER.get().unwrap());
+    if server.owner_id == msg.author.id || maintenance_user_id == msg.author.id {
         return Ok(());
     }; // owner can do any command
     let user_roles = &msg.member.as_ref().unwrap().roles;
@@ -144,7 +145,7 @@ pub async fn add_server(ctx: &Context, msg: &Message) -> Result<()> {
         mod_role_id: None,
     };
 
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     insert_or_ignore_into(servers)
         .values(&new_server)
         .execute(&conn)?;
@@ -165,7 +166,7 @@ pub async fn add_spoiler_role(
     role_id: u64,
 ) -> Result<(), BoxedError> {
     let mut member = msg.member(&ctx).await?;
-    let _ = member.add_role(&ctx, role_id).await?;
+    member.add_role(&ctx, role_id).await?;
 
     Ok(())
 }

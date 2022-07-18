@@ -49,8 +49,8 @@ pub async fn before_hook(ctx: &Context, msg: &Message, _cmd_name: &str) -> bool 
 
         check
     };
-    if server_check == false {
-        match add_server(&ctx, &msg).await {
+    if !server_check {
+        match add_server(ctx, msg).await {
             Ok(_) => (),
             Err(e) => {
                 error!("Error adding new server: {}", e);
@@ -94,7 +94,7 @@ pub async fn after_hook(
     }
 
     // always delete messages in the submission channel to keep it clean
-    if in_submission_channel(&ctx, &msg).await {
+    if in_submission_channel(ctx, msg).await {
         msg.delete(&ctx)
             .await
             .unwrap_or_else(|e| warn!("Error deleting message: {}", e));
@@ -130,8 +130,8 @@ struct General;
 #[command]
 #[bucket = "startrace"]
 pub async fn igtstart(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_race(&ctx, &msg, args, RaceType::IGT).await?;
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    start_race(ctx, msg, args, RaceType::IGT).await?;
 
     Ok(())
 }
@@ -139,8 +139,8 @@ pub async fn igtstart(ctx: &Context, msg: &Message, args: Args) -> CommandResult
 #[command]
 #[bucket = "startrace"]
 pub async fn startigt(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_race(&ctx, &msg, args, RaceType::IGT).await?;
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    start_race(ctx, msg, args, RaceType::IGT).await?;
 
     Ok(())
 }
@@ -148,8 +148,8 @@ pub async fn startigt(ctx: &Context, msg: &Message, args: Args) -> CommandResult
 #[command]
 #[bucket = "startrace"]
 pub async fn rtastart(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_race(&ctx, &msg, args, RaceType::RTA).await?;
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    start_race(ctx, msg, args, RaceType::RTA).await?;
 
     Ok(())
 }
@@ -157,8 +157,8 @@ pub async fn rtastart(ctx: &Context, msg: &Message, args: Args) -> CommandResult
 #[command]
 #[bucket = "startrace"]
 pub async fn startrta(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    start_race(&ctx, &msg, args, RaceType::RTA).await?;
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    start_race(ctx, msg, args, RaceType::RTA).await?;
 
     Ok(())
 }
@@ -166,17 +166,17 @@ pub async fn startrta(ctx: &Context, msg: &Message, args: Args) -> CommandResult
 #[command]
 pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     // this must run in a submission channel because we need a group and a maybe-race
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    if !in_submission_channel(&ctx, &msg).await {
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
 
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
-        Some(r) => stop_race(&ctx, &r, &group).await?,
+        Some(r) => stop_race(ctx, &r, &group).await?,
         None => return Ok(()),
     };
 
@@ -187,7 +187,7 @@ pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 pub async fn addgroup(ctx: &Context, msg: &Message) -> CommandResult {
     use crate::schema::channels::dsl::*;
 
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
     match msg.attachments.len() {
         1 => (),
         _ => {
@@ -198,7 +198,7 @@ pub async fn addgroup(ctx: &Context, msg: &Message) -> CommandResult {
 
     // let's check and make sure that no server has more than ten groups
     // for the sake of performance and not crashing the bot
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     let num_groups: usize = {
         let data = ctx.data.read().await;
         let group_map = data
@@ -211,7 +211,7 @@ pub async fn addgroup(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     let attachment = msg.attachments[0].download().await?;
-    let new_group = ChannelGroup::new_from_yaml(&msg, &ctx, &attachment).await?;
+    let new_group = ChannelGroup::new_from_yaml(msg, ctx, &attachment).await?;
     insert_into(channels).values(&new_group).execute(&conn)?;
     {
         let mut data = ctx.data.write().await;
@@ -234,12 +234,10 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
     use crate::schema::channels::columns::*;
     use crate::schema::channels::dsl::*;
 
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
     let this_group_name = args.single_quoted::<String>()?;
     let this_server_id = *msg.guild_id.unwrap().as_u64();
-    let conn = get_connection(&ctx).await;
-    // we have to be a little inefficient here unless we change how groups are looked
-    // up in the share map
+    let conn = get_connection(ctx).await;
     let group_submission: u64 = channels
         .select(submission)
         .filter(server_id.eq(this_server_id))
@@ -253,7 +251,7 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
             .expect("No group container in share map");
         group_map
             .remove(&group_submission)
-            .ok_or(anyhow!("Error removing group from share map"))?;
+            .ok_or_else(|| anyhow!("Error removing group from share map"))?;
         let submission_set = data
             .get_mut::<SubmissionSet>()
             .expect("No submission set in share map");
@@ -268,7 +266,7 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
 
 #[command]
 pub async fn listgroups(ctx: &Context, msg: &Message) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
     let this_server_id = *msg.guild_id.unwrap().as_u64();
     let group_names = {
         let data = ctx.data.read().await;
@@ -293,46 +291,32 @@ pub async fn listgroups(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 pub async fn setadminrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
-    set_role_from_command(&ctx, &msg, args, Permission::Admin, ServerRoleAction::Add).await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
+    set_role_from_command(ctx, msg, args, Permission::Admin, ServerRoleAction::Add).await?;
 
     Ok(())
 }
 
 #[command]
 pub async fn setmodrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
-    set_role_from_command(&ctx, &msg, args, Permission::Admin, ServerRoleAction::Add).await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
+    set_role_from_command(ctx, msg, args, Permission::Admin, ServerRoleAction::Add).await?;
 
     Ok(())
 }
 
 #[command]
 pub async fn removeadminrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
-    set_role_from_command(
-        &ctx,
-        &msg,
-        args,
-        Permission::Admin,
-        ServerRoleAction::Remove,
-    )
-    .await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
+    set_role_from_command(ctx, msg, args, Permission::Admin, ServerRoleAction::Remove).await?;
 
     Ok(())
 }
 
 #[command]
 pub async fn removemodrole(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Admin).await?;
-    set_role_from_command(
-        &ctx,
-        &msg,
-        args,
-        Permission::Admin,
-        ServerRoleAction::Remove,
-    )
-    .await?;
+    check_permissions(ctx, msg, Permission::Admin).await?;
+    set_role_from_command(ctx, msg, args, Permission::Admin, ServerRoleAction::Remove).await?;
 
     Ok(())
 }
@@ -342,8 +326,8 @@ pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResu
     use crate::schema::submissions::columns::*;
     use crate::schema::submissions::dsl::*;
 
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    if !in_submission_channel(&ctx, &msg).await {
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
     if args.len() != 1 {
@@ -351,8 +335,8 @@ pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResu
     }
     let maybe_runner: &str = args.rest().trim_end();
 
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
     let race = match get_maybe_active_race(&conn, &group) {
         Some(r) => r,
@@ -380,24 +364,24 @@ pub async fn removetime(ctx: &Context, msg: &Message, args: Args) -> CommandResu
             &msg.author.name, e
         ),
     };
-    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
+    build_leaderboard(ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
 
 #[command]
 pub async fn refresh(ctx: &Context, msg: &Message) -> CommandResult {
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    if !in_submission_channel(&ctx, &msg).await {
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
 
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
-        Some(r) => build_leaderboard(&ctx, &group, &r, ChannelType::Leaderboard).await?,
+        Some(r) => build_leaderboard(ctx, &group, &r, ChannelType::Leaderboard).await?,
         None => return Ok(()),
     };
 
@@ -411,13 +395,13 @@ pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     // game, especially if we get games were people will be using any optional, non
     // collection rate fields etc. but for now a command that simply changes the time
     // is sufficient.
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    if !in_submission_channel(&ctx, &msg).await {
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
 
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
     let race = match get_maybe_active_race(&conn, &group) {
         Some(r) => r,
@@ -448,7 +432,7 @@ pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     diesel::update(&submission)
         .set(runner_time.eq(new_time))
         .execute(&conn)?;
-    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
+    build_leaderboard(ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
@@ -456,13 +440,13 @@ pub async fn settime(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
 #[command]
 pub async fn setcollection(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     use crate::schema::submissions::columns::*;
-    check_permissions(&ctx, &msg, Permission::Mod).await?;
-    if !in_submission_channel(&ctx, &msg).await {
+    check_permissions(ctx, msg, Permission::Mod).await?;
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
 
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
     let race = match get_maybe_active_race(&conn, &group) {
         Some(r) => r,
@@ -494,7 +478,7 @@ pub async fn setcollection(ctx: &Context, msg: &Message, mut args: Args) -> Comm
     diesel::update(&submission)
         .set(runner_collection.eq(new_collection))
         .execute(&conn)?;
-    build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard).await?;
+    build_leaderboard(ctx, &group, &race, ChannelType::Leaderboard).await?;
 
     Ok(())
 }
@@ -510,11 +494,11 @@ async fn set_role_from_command(
     use crate::schema::servers::dsl::*;
 
     let role_id: Option<u64> = match role_action {
-        ServerRoleAction::Add => Some(parse_role(&ctx, &msg, args).await?),
+        ServerRoleAction::Add => Some(parse_role(ctx, msg, args).await?),
         ServerRoleAction::Remove => None,
     };
     let this_server_id = msg.guild_id.unwrap();
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
 
     match role_type {
         Permission::Admin => {
@@ -554,18 +538,18 @@ async fn start_race(
     use crate::schema::async_races::dsl::*;
 
     // this command must be run in a submission channel
-    if !in_submission_channel(&ctx, &msg).await {
+    if !in_submission_channel(ctx, msg).await {
         return Ok(());
     }
-    let group_fut = get_group(&ctx, &msg);
-    let conn_fut = get_connection(&ctx);
+    let group_fut = get_group(ctx, msg);
+    let conn_fut = get_connection(ctx);
     let (group, conn) = join!(group_fut, conn_fut);
 
     // determine if a game is already running in this group. if yes, stop the game
     // before starting a new one.
     let maybe_active_race = get_maybe_active_race(&conn, &group);
     match maybe_active_race {
-        Some(r) => stop_race(&ctx, &r, &group).await?,
+        Some(r) => stop_race(ctx, &r, &group).await?,
         None => (),
     };
     let game: BoxedGame = get_game_boxed(&args).await?;
@@ -583,7 +567,7 @@ async fn start_race(
 
     // use boxed game to build and post messages in submission and leaderboard channels
     // add both messages to messages table. rows in this table belong to async races.
-    handle_new_race_messages(&ctx, &group, &race_data).await?;
+    handle_new_race_messages(ctx, &group, &race_data).await?;
 
     Ok(())
 }
@@ -594,23 +578,23 @@ async fn stop_race(
     group: &ChannelGroup,
 ) -> Result<(), BoxedError> {
     use crate::schema::async_races;
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     diesel::update(race)
         .set(async_races::race_active.eq(false))
         .execute(&conn)?;
     let leaderboard_msgs_data: Vec<BotMessage> = get_lb_msgs_data(&conn, race.race_id)?;
-    if leaderboard_msgs_data.len() == 0 {
+    if leaderboard_msgs_data.is_empty() {
         // this should never happen
         return Err(
             anyhow!("Tried to stop active game with no leaderboard messages in database").into(),
         );
     }
     for d in leaderboard_msgs_data.iter() {
-        let _ = ctx.http.delete_message(d.channel_id, d.message_id).await?;
+        ctx.http.delete_message(d.channel_id, d.message_id).await?;
     }
 
-    let lb_fut = build_leaderboard(&ctx, &group, &race, ChannelType::Submission);
-    let role_del_fut = remove_spoiler_roles(&ctx, &group, &race);
+    let lb_fut = build_leaderboard(ctx, group, race, ChannelType::Submission);
+    let role_del_fut = remove_spoiler_roles(ctx, group, race);
 
     try_join!(lb_fut, role_del_fut)?;
 
@@ -626,7 +610,7 @@ async fn remove_spoiler_roles(
     // so we can use them to remove the spoiler role when the race has stopped
     use crate::schema::submissions::columns::*;
 
-    let conn = get_connection(&ctx).await;
+    let conn = get_connection(ctx).await;
     let user_ids = Submission::belonging_to(race)
         .select(runner_id)
         .load::<u64>(&conn)?;
