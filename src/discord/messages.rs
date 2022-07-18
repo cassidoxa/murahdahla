@@ -4,7 +4,10 @@ use diesel::prelude::*;
 use futures::{join, try_join};
 use serenity::{
     framework::standard::macros::hook,
-    model::{channel::Message, id::ChannelId},
+    model::{
+        channel::Message,
+        id::{ChannelId, UserId},
+    },
     prelude::*,
     utils::MessageBuilder,
 };
@@ -13,11 +16,15 @@ use crate::{
     discord::{
         channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
         servers::add_spoiler_role,
-        submissions::{build_leaderboard, process_submission, Submission},
+        submissions::{
+            build_leaderboard, process_submission, write_submission_add_role, NewSubmission,
+            Submission,
+        },
     },
     games::{get_maybe_active_race, AsyncRaceData, DataDisplay},
     helpers::*,
     schema::*,
+    MAINTENANCE_USER,
 };
 
 #[derive(Debug, Insertable, Queryable, Identifiable, Associations)]
@@ -95,33 +102,41 @@ pub async fn normal_message_hook(ctx: &Context, msg: &Message) {
         .is_some()
     {
         info!("Duplicate submission from \"{}\"", &msg.author.name);
-        let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
+        let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| info!("{}", e));
         return;
     }
 
     // here we parse a possible time submission. If we get a good submission, insert
     // it into the database and we'll call a function to refresh the leaderboard from the
     // db below
-    match process_submission(&ctx, &msg, &race).await {
-        Ok(_) => (),
+    let submission: NewSubmission = match process_submission(&msg, &race) {
+        Ok(s) => s,
         Err(e) => {
             let _ = delete_sub_msg(&ctx, &msg).await.map_err(|e| warn!("{}", e));
             warn!("Error processing submission: {}", e);
+            message_maintenance_user(&ctx, e).await;
             return;
         }
     };
 
-    // if processing the submission fails we don't want to do these but otherwise
-    // they can probably be done concurrently
     let role_fut = add_spoiler_role(&ctx, &msg, group.spoiler_role_id);
+    let _ = match write_submission_add_role(&ctx, &submission, role_fut).await {
+        Ok(_) => (),
+        Err(e) => {
+            warn!("Error finalizing submission: {}", e);
+            message_maintenance_user(&ctx, e).await
+        }
+    };
+
     // refresh leaderboard from db
     let lb_fut = build_leaderboard(&ctx, &group, &race, ChannelType::Leaderboard);
     let delete_fut = delete_sub_msg(&ctx, &msg);
 
-    match try_join!(role_fut, lb_fut, delete_fut) {
+    match try_join!(lb_fut, delete_fut) {
         Ok(_) => (),
         Err(e) => {
             warn!("Error during post-submission: {}", e);
+            message_maintenance_user(&ctx, e).await;
             return;
         }
     };
@@ -215,4 +230,24 @@ async fn delete_sub_msg(ctx: &Context, msg: &Message) -> Result<(), BoxedError> 
         Ok(_) => Ok(()),
         Err(e) => Err(anyhow!("Error deleting submission message: {}", e).into()),
     }
+}
+
+pub async fn message_maintenance_user<T: std::fmt::Display>(ctx: &Context, msg: T) -> () {
+    let recipient = match UserId::from(*MAINTENANCE_USER.get().unwrap())
+        .to_user(&ctx)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Error messaging maintenance user: {}", e);
+            return;
+        }
+    };
+    let _ = match recipient.direct_message(&ctx, |m| m.content(&msg)).await {
+        Ok(_) => (),
+        Err(e) => {
+            error!("Error messaging maintenance user: {}", e);
+            return;
+        }
+    };
 }

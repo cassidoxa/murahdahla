@@ -1,4 +1,4 @@
-use std::{default::Default, fmt};
+use std::{default::Default, fmt, future::Future};
 
 use anyhow::{anyhow, Result};
 use chrono::{Duration, NaiveDateTime, NaiveTime, Utc};
@@ -156,8 +156,6 @@ impl NewSubmission {
         // well up the stack but in the interest of avoiding panics let's return a result
         // with a non-mutable cloned Self since this will be the final building method
 
-        // i feel like there is a more elegant way to do this but this works for now
-
         self.race_game = game;
         match game {
             GameName::ALTTPR => Ok(z3r::game_info(self, submission_msg)?.clone()),
@@ -187,33 +185,25 @@ impl Default for NewSubmission {
     }
 }
 
-pub async fn process_submission(
-    ctx: &Context,
+pub fn process_submission(
     msg: &Message,
     race: &AsyncRaceData,
-) -> Result<(), BoxedError> {
-    use crate::schema::submissions::dsl::*;
-
+) -> Result<NewSubmission, BoxedError> {
     // in some cases this will return Ok despite not successfully inserting a submission
     // ie when a submission is malformed. the submitter is expected to know and recognize
     // that the submission was malformed when their message is deleted and they dont
     // have access to the leaderboard and spoilers channel
-    let conn = get_connection(&ctx).await;
+
     let mut maybe_submission_text: Vec<&str> =
         msg.content.as_str().trim_end().split_whitespace().collect();
     if !(maybe_submission_text.len() >= 1) {
-        return Ok(());
+        return Err(anyhow!("Received submission with no text.").into());
     }
     // first check to see if the user has forfeited
     // the length check here should short circuit so we don't have to worry
     // about panicking if there's no text
     if maybe_submission_text.len() >= 1 && FORFEIT.iter().any(|&x| x == maybe_submission_text[0]) {
-        insert_forfeit(&ctx, &msg, &race).await?;
-        info!(
-            "Successfully entered submission for user \"{}\"",
-            &msg.author.name
-        );
-        return Ok(());
+        forfeit(&msg, &race)?;
     }
 
     // lets start with a default submission struct and add in what can here. then we'll
@@ -243,16 +233,12 @@ pub async fn process_submission(
         .name(&msg.author.name)
         .set_time(Some(time))
         .set_game_info(race.race_game, &maybe_submission_text)?;
-    diesel::insert_into(submissions)
-        .values(submission)
-        .execute(&conn)?;
 
-    Ok(())
+    Ok(submission)
 }
 
-async fn insert_forfeit(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> Result<()> {
-    use crate::schema::submissions::dsl::*;
-
+#[inline]
+fn forfeit(msg: &Message, race: &AsyncRaceData) -> Result<NewSubmission> {
     let submission = NewSubmission {
         runner_id: *msg.author.id.as_u64(),
         race_id: race.race_id,
@@ -265,12 +251,8 @@ async fn insert_forfeit(ctx: &Context, msg: &Message, race: &AsyncRaceData) -> R
         option_text: None,
         runner_forfeit: true,
     };
-    let conn = get_connection(&ctx).await;
-    diesel::insert_into(submissions)
-        .values(&submission)
-        .execute(&conn)?;
 
-    Ok(())
+    Ok(submission)
 }
 
 pub async fn build_leaderboard(
@@ -399,7 +381,7 @@ async fn fill_leaderboard(
 }
 
 async fn resize_leaderboard<'a>(
-    ctx: &Context,
+    ctx: &'a Context,
     this_server_id: u64,
     target: ChannelType,
     target_channel_id: u64,
@@ -425,7 +407,7 @@ async fn resize_leaderboard<'a>(
 pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
     // technically NaiveTime represents a time of day but it works for our purposes
     let mut time_string = String::with_capacity(9);
-    let split_time = maybe_time.clone().split(":");
+    let split_time = maybe_time.split(":");
     match split_time.count() {
         0 => return Err(anyhow!("Empty submission time")),
         1 => {
@@ -444,4 +426,21 @@ pub fn parse_variable_time(maybe_time: &str) -> Result<NaiveTime> {
     let time = NaiveTime::parse_from_str(&time_string, "%H:%M:%S").map_err(|e| anyhow!("{}", e));
 
     time
+}
+
+pub async fn write_submission_add_role(
+    ctx: &Context,
+    s: &NewSubmission,
+    role_fut: impl Future<Output = Result<(), BoxedError>>,
+) -> Result<(), BoxedError> {
+    use crate::schema::submissions::dsl::*;
+
+    let conn = get_connection(&ctx).await;
+    match role_fut.await {
+        Ok(_) => (),
+        Err(e) => return Err(anyhow!("Could not add role: {}", e).into()),
+    }
+    diesel::insert_into(submissions).values(s).execute(&conn)?;
+
+    Ok(())
 }

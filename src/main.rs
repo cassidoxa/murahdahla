@@ -5,6 +5,7 @@ extern crate diesel;
 use dotenv::dotenv;
 #[macro_use]
 extern crate log;
+use once_cell::sync::OnceCell;
 use serenity::{framework::standard::StandardFramework, prelude::*};
 
 pub mod discord;
@@ -16,12 +17,14 @@ use crate::{
     discord::{
         channel_groups::{get_groups, get_submission_channels},
         commands::{after_hook, before_hook, GENERAL_GROUP},
+        intents,
         messages::{normal_message_hook, Handler},
         servers::get_servers,
-        MURAHDAHLA_INTENTS,
     },
     helpers::*,
 };
+
+static MAINTENANCE_USER: OnceCell<u64> = OnceCell::new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,22 +34,24 @@ async fn main() -> anyhow::Result<()> {
     let token = env::var("MURAHDAHLA_DISCORD_TOKEN")
         .expect("Expected MURAHDAHLA_DISCORD_TOKEN in the environment.");
     let database_url = env::var("DATABASE_URL").expect("Expected DATABASE_URL in the environment");
+    let maintenance_user: u64 = env::var("MAINTENANCE_USER")
+        .expect("Expected MAINTENANCE_USER in the environment")
+        .parse::<u64>()
+        .expect("Expected MAINTENANCE_USER to be parsable to 64-bit integer");
+    MAINTENANCE_USER.set(maintenance_user).unwrap();
     let framework = StandardFramework::new()
         .configure(|c| c.prefix("!").allow_dm(false))
         .group(&GENERAL_GROUP)
         .before(before_hook)
         .after(after_hook)
-        .normal_message(normal_message_hook)
-        // we probably want a better rate limiting solution but let's put a nominal limit
-        // on it for now since startrace will be making requests
-        .bucket("startrace", |b| b.delay(2))
-        .await;
+        .normal_message(normal_message_hook);
 
-    let mut client = Client::builder(&token, MURAHDAHLA_INTENTS)
+    let mut client = Client::builder(&token, intents())
         .framework(framework)
+        .cache_settings(|c| c.max_messages(30))
         .event_handler(Handler)
-        .await
-        .expect("Error creating client");
+        .await?;
+    //.expect("Error creating client");
 
     {
         let mut data = client.data.write().await;
@@ -65,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         data.insert::<GroupContainer>(groups);
     }
 
-    if let Err(e) = client.start().await {
+    if let Err(e) = client.start_autosharded().await {
         error!("Client error: {:?}", e);
     }
 
