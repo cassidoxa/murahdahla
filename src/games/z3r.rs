@@ -247,9 +247,7 @@ fn get_code(patch_map: &Map<String, Value>) -> Result<Vec<&'static str>> {
         .keys()
         .map(|s| s.parse::<u64>().unwrap())
         .reduce(|a, b| {
-            if b == FILE_SELECT_CODE {
-                b
-            } else if (b > a) && (b < FILE_SELECT_CODE) {
+            if (b == FILE_SELECT_CODE) || ((b > a) && (b < FILE_SELECT_CODE)) {
                 b
             } else {
                 a
