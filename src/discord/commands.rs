@@ -238,28 +238,29 @@ pub async fn removegroup(ctx: &Context, msg: &Message, mut args: Args) -> Comman
     let this_group_name = args.single_quoted::<String>()?;
     let this_server_id = *msg.guild_id.unwrap().as_u64();
     let conn = get_connection(ctx).await;
-    let group_submission: u64 = channels
-        .select(submission)
+    let this_group: ChannelGroup = channels
         .filter(server_id.eq(this_server_id))
-        .filter(group_name.eq(this_group_name))
+        .filter(group_name.eq(&this_group_name))
         .get_result(&conn)?;
-
     {
         let mut data = ctx.data.write().await;
         let group_map = data
             .get_mut::<GroupContainer>()
             .expect("No group container in share map");
         group_map
-            .remove(&group_submission)
+            .remove(&this_group.submission)
             .ok_or_else(|| anyhow!("Error removing group from share map"))?;
         let submission_set = data
             .get_mut::<SubmissionSet>()
             .expect("No submission set in share map");
-        submission_set.remove(&group_submission);
+        submission_set.remove(&this_group.submission);
     };
-    diesel::delete(channels)
-        .filter(submission.eq(group_submission))
-        .execute(&conn)?;
+    diesel::delete(
+        channels
+            .filter(group_name.eq(this_group.group_name))
+            .filter(server_id.eq(this_group.server_id)),
+    )
+    .execute(&conn)?;
 
     Ok(())
 }

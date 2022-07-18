@@ -61,4 +61,5 @@ CREATE TABLE submissions(
     INDEX (race_id),
     FOREIGN KEY (race_id)
         REFERENCES async_races(race_id)
+        ON DELETE CASCADE
 );
