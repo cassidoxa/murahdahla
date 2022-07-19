@@ -1,0 +1,27 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  DATABASE_URL: mysql://root:root@localhost/murahdahla
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Start DB
+      run: sudo systemctl start mysql.service
+    - name: Install Diesel-cli
+      run: cargo install diesel_cli --no-default-features --features "mysql"
+    - name: Diesel Setup
+      run: diesel setup
+    - name: Check
+      run: cargo check --verbose
