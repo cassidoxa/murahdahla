@@ -1,4 +1,4 @@
-name: Rust
+name: Setup & Cargo Check
 
 on:
   push:
@@ -24,4 +24,4 @@ jobs:
     - name: Diesel Setup
       run: diesel setup
     - name: Check
-      run: cargo check --verbose
+      run: cargo check
