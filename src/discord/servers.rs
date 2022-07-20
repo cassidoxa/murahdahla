@@ -111,7 +111,9 @@ pub fn get_servers(conn: &PooledConn) -> Result<HashMap<GuildId, DiscordServer>>
 pub async fn check_permissions(ctx: &Context, msg: &Message, req: Permission) -> Result<()> {
     let server: Guild = msg.guild(&ctx).unwrap();
     let maintenance_user_id = UserId::from(*MAINTENANCE_USER.get().unwrap());
-    if server.owner_id == msg.author.id || maintenance_user_id == msg.author.id {
+    if server.owner_id == msg.author.id
+        || (maintenance_user_id != 0u64 && maintenance_user_id == msg.author.id)
+    {
         return Ok(());
     }; // owner can do any command
     let user_roles = &msg.member.as_ref().unwrap().roles;

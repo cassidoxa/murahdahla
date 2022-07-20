@@ -16,7 +16,8 @@ use crate::{
     discord::{
         channel_groups::{get_group, in_submission_channel, ChannelGroup, ChannelType},
         messages::{
-            build_listgroups_message, get_lb_msgs_data, handle_new_race_messages, BotMessage,
+            build_listgroups_message, get_lb_msgs_data, handle_new_race_messages,
+            message_maintenance_user, BotMessage,
         },
         servers::{add_server, check_permissions, parse_role, Permission, ServerRoleAction},
         submissions::{build_leaderboard, parse_variable_time, Submission},
@@ -72,10 +73,12 @@ pub async fn after_hook(
     let mut successful: bool = true;
     if let Err(e) = error {
         successful = false;
-        warn!(
+        let error_msg: String = format!(
             "Error running \"{}\" command from user \"{}\": {:?}",
             cmd_name, &msg.author.name, e
         );
+        warn!("{}", &error_msg);
+        message_maintenance_user(ctx, error_msg).await;
     }
     if REACT_COMMANDS.iter().any(|&c| c == cmd_name) {
         let reaction = match successful {

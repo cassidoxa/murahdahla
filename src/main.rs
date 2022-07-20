@@ -1,3 +1,4 @@
+#![allow(clippy::extra_unused_lifetimes)] // Diesel Insertable derive macro
 use std::env;
 
 #[macro_use]
