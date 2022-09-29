@@ -133,14 +133,6 @@ will gather some information about the game to display in the submission channel
 the leaderboard. You can also pass other URLs or information (e.g. settings, flag strings,
 seeds, etc) to the start commands and those will be displayed as provided as well.
 
-It also supports SRAM submissions (uploading an .srm file into the submission channel) for
-the following games when the race is timed by in-game time (IGT):
-
-* ALTTPR
-* SMZ3
-* SM Rando (total)
-* SM VARIA Rando
-
 ## Time Submissions and Arguments
 
 Subissions will always require a time in the format "HH:MM:SS". Additionally, many randomizers
@@ -161,6 +153,9 @@ was malformed in some way or lacking a required argument. Note that submissions 
 hard maximum of 23:59:59.
 
 # Bot Commands
+
+All of these commands are available to a "maintenance user" which can be set by the `MAINTENANCE_USER`
+environment variable in `.env` with a 64-bit Discord user id.
 
 ## Admin Commands
 
