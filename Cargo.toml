@@ -9,34 +9,33 @@ rust-version = "1.60"
 anyhow = "1.0"
 base64 = "0.13"
 byteorder = "1.4.3"
-chrono = "0.4"
+chrono = "0.4.34"
 dotenv = "0.15"
 env_logger = "0.9"
 futures = "0.3"
 log = "0.4"
-once_cell = "1.13.0"
-serde = "1.0"
-serde_json = "1.0"
-serde_yaml = "0.8"
+serde = "1"
+serde_json = "1"
+serde_yaml = "0.9"
 url = "2.2"
 uuid = { version = "1.1", features = ["serde", "v4"] }
 
 [dependencies.diesel]
-version = "1.4"
+version = "1.4.8"
 default-features = false
 features = ["mysql", "chrono", "r2d2"]
 
 [dependencies.reqwest]
-version = "0.11.11"
+version = "0.11.24"
 default-features = false
 features = ["rustls-tls", "json", "gzip"]
 
 [dependencies.serenity]
-version = "0.11.5"
+version = "0.11.7"
 features = ["builder", "cache", "standard_framework", "rustls_backend", "http"]
 
 [dependencies.tokio]
-version = "1.24"
+version = "1.36"
 default-features = false
 features = ["macros", "rt-multi-thread"]
 

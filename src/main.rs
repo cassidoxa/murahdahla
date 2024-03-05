@@ -1,12 +1,12 @@
 #![allow(clippy::extra_unused_lifetimes)] // Diesel Insertable derive macro
-use std::env;
+use std::{env, sync::OnceLock};
 
 #[macro_use]
 extern crate diesel;
-use dotenv::dotenv;
 #[macro_use]
 extern crate log;
-use once_cell::sync::OnceCell;
+
+use dotenv::dotenv;
 use serenity::{framework::standard::StandardFramework, prelude::*};
 
 pub mod discord;
@@ -25,7 +25,7 @@ use crate::{
     helpers::*,
 };
 
-static MAINTENANCE_USER: OnceCell<u64> = OnceCell::new();
+static MAINTENANCE_USER: OnceLock<u64> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

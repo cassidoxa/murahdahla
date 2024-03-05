@@ -60,7 +60,7 @@ impl NewAsyncRaceData {
         group_id: &[u8],
         race_type: RaceType,
     ) -> Result<Self, BoxedError> {
-        let todays_date = Utc::today().naive_utc();
+        let todays_date = Utc::now().date_naive();
         let settings_string = game.settings_str()?;
         let maybe_url: Option<String> = match game.has_url() {
             true => Some(game.game_url().unwrap().to_owned()),
